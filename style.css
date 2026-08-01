@@ -1,0 +1,682 @@
+/* ---- Base / reset ---- */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+:root {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
+  --muted: #767676;
+  --accent: #2f6fed;
+  --accent-active: #2558c0;
+  --error: #d1293d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --surface: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #f0f0f0;
+    --muted: #9a9a9a;
+    --accent: #4c86ff;
+    --accent-active: #3a6bd6;
+    --error: #ff6b7a;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- Layout ---- */
+.app-header {
+  padding: 16px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.ios-install-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.ios-install-banner[hidden] {
+  display: none;
+}
+
+.ios-install-banner p {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.ios-install-banner button {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+#app {
+  padding: 16px;
+  padding-bottom: 96px; /* leave room for the floating button */
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.screen {
+  display: none;
+  width: 100%;
+}
+
+.screen.active {
+  display: block;
+}
+
+/* ---- Games list ---- */
+.games-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.games-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.games-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-winner {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--muted);
+  padding: 48px 16px;
+  font-size: 1.05rem;
+}
+
+.game-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font-size: 1rem;
+}
+
+/* ---- New Game button (floating action button) ---- */
+.fab {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.fab:active {
+  background: var(--accent-active);
+}
+
+/* ---- Buttons (shared) ---- */
+.btn-primary,
+.btn-secondary {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.btn-primary {
+  border: none;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-primary:active {
+  background: var(--accent-active);
+}
+
+.btn-secondary {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.btn-secondary:active {
+  background: var(--border);
+}
+
+/* ---- New Game screen ---- */
+.field label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stepper-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.4;
+}
+
+.stepper-value {
+  min-width: 32px;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.player-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.player-name-input {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+  width: 100%;
+}
+
+.form-error {
+  color: var(--error);
+  margin-top: 14px;
+  font-size: 0.95rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.form-actions .btn-primary,
+.form-actions .btn-secondary {
+  flex: 1;
+}
+
+.select-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.full-width-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* ---- Scorecard screen ---- */
+.scorecard-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.scorecard-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorecard-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.scorecard-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.scorecard-table th,
+.scorecard-table td {
+  padding: 10px 8px;
+  text-align: center;
+  min-width: 72px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.scorecard-table .round-col {
+  min-width: 60px;
+  width: 60px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.scorecard-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  z-index: 2;
+}
+
+.scorecard-table tbody td {
+  background: var(--bg);
+}
+
+.scorecard-table td.score-cell {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 15px 8px;
+}
+
+.scorecard-table td.score-cell:active {
+  background: var(--border);
+}
+
+.scorecard-table tfoot td {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  font-weight: 700;
+  z-index: 2;
+}
+
+.scorecard-table tfoot td.leader-total {
+  color: var(--accent);
+}
+
+.scorecard-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.scorecard-actions button {
+  flex: 1;
+}
+
+/* ---- Round score entry sheet ---- */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.score-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+}
+
+.score-sheet[hidden] {
+  display: none;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheet-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.sheet-contract {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sheet-close-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.sheet-players {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sheet-player-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheet-player-name {
+  font-size: 1rem;
+}
+
+.sheet-score-input {
+  width: 92px;
+  min-height: 44px;
+  text-align: center;
+  font-size: 16px; /* keeps iOS from zooming in on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.sheet-actions button {
+  flex: 1;
+}
+
+/* ---- Summary screen ---- */
+.standings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.standing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.standing-row.is-winner {
+  border-color: var(--accent);
+}
+
+.standing-rank {
+  width: 28px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.standing-name {
+  flex: 1;
+  font-size: 1rem;
+}
+
+.standing-total {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.standing-row.is-winner .standing-total {
+  color: var(--accent);
+}
+
+.chart-container {
+  margin-top: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.chart-container svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.chart-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---- Settings screen ---- */
+.settings-section-title {
+  margin: 24px 0 12px;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.settings-section-title:first-of-type {
+  margin-top: 4px;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-row .player-name-input {
+  flex: 1;
+}
+
+.settings-row-delete {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--error);
+  font-size: 1.2rem;
+}
+
+.settings-row-delete:disabled {
+  opacity: 0.3;
+  color: var(--muted);
+}
+
+.contract-set-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font-size: 1rem;
+}
+
+.contract-set-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.settings-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 8px 0;
+}
+
+.data-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.data-actions button,
+.data-actions .file-label {
+  flex: 1;
+}
+
+.file-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* ---- Contract set editor ---- */
+.contract-rounds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.contract-round-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contract-round-row .player-name-input {
+  flex: 1;
+}
+
+.contract-round-reorder,
+.contract-round-remove {
+  width: 40px;
+  height: 44px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.contract-round-reorder:disabled {
+  opacity: 0.3;
+}
+
+.contract-round-remove {
+  color: var(--error);
+}

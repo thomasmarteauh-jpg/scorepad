@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#121212" />
+  <title>ScorePad</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ScorePad" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>ScorePad</h1>
+  </header>
+
+  <div id="ios-install-banner" class="ios-install-banner" hidden>
+    <p>Install ScorePad: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</p>
+    <button type="button" id="ios-install-dismiss-btn" aria-label="Dismiss">×</button>
+  </div>
+
+  <main id="app">
+    <!-- Screen 1: list of games -->
+    <section id="games-screen" class="screen">
+      <div class="games-header">
+        <h2>Games</h2>
+        <button type="button" id="settings-nav-btn" class="btn-secondary">Settings</button>
+      </div>
+      <div id="games-list" class="games-list">
+        <!-- Game entries or empty state get rendered here by app.js -->
+      </div>
+    </section>
+
+    <!-- Screen 2: new game setup form -->
+    <section id="new-game-screen" class="screen">
+      <h2>New Game</h2>
+
+      <div class="field">
+        <label>Number of players</label>
+        <div class="stepper">
+          <button type="button" id="player-count-minus" class="stepper-btn" aria-label="Fewer players">−</button>
+          <span id="player-count-value" class="stepper-value">4</span>
+          <button type="button" id="player-count-plus" class="stepper-btn" aria-label="More players">+</button>
+        </div>
+      </div>
+
+      <div id="player-name-fields" class="player-fields">
+        <!-- Name inputs rendered by app.js based on player count -->
+      </div>
+      <datalist id="player-names-datalist"></datalist>
+
+      <div class="field">
+        <label for="contract-set-select">Contract set</label>
+        <select id="contract-set-select" class="select-input"></select>
+      </div>
+
+      <p id="new-game-error" class="form-error" hidden></p>
+
+      <div class="form-actions">
+        <button type="button" id="cancel-new-game-btn" class="btn-secondary">Cancel</button>
+        <button type="button" id="start-game-btn" class="btn-primary">Start Game</button>
+      </div>
+    </section>
+
+    <!-- Screen 3: scorecard for one game -->
+    <section id="scorecard-screen" class="screen">
+      <div class="scorecard-header">
+        <button type="button" id="back-to-games-btn" class="btn-secondary">← Games</button>
+        <h2 id="scorecard-title"></h2>
+      </div>
+
+      <div class="scorecard-scroll">
+        <table class="scorecard-table" id="scorecard-table">
+          <thead>
+            <tr id="scorecard-header-row"></tr>
+          </thead>
+          <tbody id="scorecard-body"></tbody>
+          <tfoot>
+            <tr id="scorecard-totals-row"></tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="scorecard-actions">
+        <button type="button" id="undo-round-btn" class="btn-secondary">Undo Last Round</button>
+        <button type="button" id="add-round-btn" class="btn-secondary">+ Add Round</button>
+      </div>
+      <button type="button" id="view-summary-btn" class="btn-secondary full-width-btn">View Summary</button>
+    </section>
+
+    <!-- Screen 4: game summary (standings + cumulative chart) -->
+    <section id="summary-screen" class="screen">
+      <div class="scorecard-header">
+        <button type="button" id="summary-back-btn" class="btn-secondary">← Scorecard</button>
+        <h2 id="summary-title"></h2>
+      </div>
+
+      <ol id="standings-list" class="standings-list"></ol>
+
+      <div id="chart-container" class="chart-container"></div>
+      <div id="chart-legend" class="chart-legend"></div>
+
+      <button type="button" id="toggle-complete-btn" class="btn-secondary full-width-btn"></button>
+    </section>
+
+    <!-- Screen 5: settings (players + contract sets + data) -->
+    <section id="settings-screen" class="screen">
+      <div class="scorecard-header">
+        <button type="button" id="settings-back-btn" class="btn-secondary">← Games</button>
+        <h2>Settings</h2>
+      </div>
+
+      <h3 class="settings-section-title">Players</h3>
+      <div id="settings-players-list" class="settings-list"></div>
+
+      <h3 class="settings-section-title">Contract Sets</h3>
+      <div id="settings-contract-sets-list" class="settings-list"></div>
+      <button type="button" id="new-contract-set-btn" class="btn-secondary full-width-btn">+ New Contract Set</button>
+
+      <h3 class="settings-section-title">Data</h3>
+      <p class="settings-hint">Back up all games, players, and contract sets to a file, or restore from one.</p>
+      <div class="data-actions">
+        <button type="button" id="export-data-btn" class="btn-secondary">Export Data</button>
+        <label for="import-data-input" class="btn-secondary file-label">Import Data</label>
+        <input type="file" id="import-data-input" accept="application/json" hidden />
+      </div>
+      <p id="data-status" class="settings-hint" hidden></p>
+    </section>
+
+    <!-- Screen 6: edit one contract set -->
+    <section id="contract-set-screen" class="screen">
+      <div class="scorecard-header">
+        <button type="button" id="contract-set-back-btn" class="btn-secondary">← Settings</button>
+        <h2>Edit Contract Set</h2>
+      </div>
+
+      <div class="field">
+        <label for="contract-set-name-input">Name</label>
+        <input type="text" id="contract-set-name-input" class="player-name-input" />
+      </div>
+
+      <div id="contract-rounds-list" class="contract-rounds-list"></div>
+      <button type="button" id="add-contract-round-btn" class="btn-secondary full-width-btn">+ Add Round</button>
+
+      <div class="form-actions">
+        <button type="button" id="delete-contract-set-btn" class="btn-secondary">Delete Set</button>
+        <button type="button" id="save-contract-set-btn" class="btn-primary">Save</button>
+      </div>
+    </section>
+  </main>
+
+  <button id="new-game-btn" class="fab" type="button" aria-label="New Game">
+    + New Game
+  </button>
+
+  <!-- Round score entry sheet, shared by every tappable cell -->
+  <div id="sheet-overlay" class="sheet-overlay" hidden></div>
+  <div id="score-sheet" class="score-sheet" hidden>
+    <div class="sheet-header">
+      <div>
+        <h3 id="sheet-round-title"></h3>
+        <p id="sheet-contract" class="sheet-contract"></p>
+      </div>
+      <button type="button" id="sheet-close-btn" class="sheet-close-btn" aria-label="Close">×</button>
+    </div>
+    <div id="sheet-players" class="sheet-players"></div>
+    <div class="sheet-actions">
+      <button type="button" id="sheet-cancel-btn" class="btn-secondary">Cancel</button>
+      <button type="button" id="sheet-save-btn" class="btn-primary">Save</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/dexie@3/dist/dexie.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
