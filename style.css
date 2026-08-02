@@ -39,6 +39,10 @@ body {
   color: var(--text);
   min-height: 100vh;
   -webkit-tap-highlight-color: transparent;
+  /* Kills double-tap-to-zoom. Descendants inherit the restriction through the
+     ancestor chain, and elements needing more (e.g. the swipeable game rows)
+     narrow it further themselves. */
+  touch-action: manipulation;
 }
 
 /* ---- Layout ---- */

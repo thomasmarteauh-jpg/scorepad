@@ -1271,6 +1271,17 @@ deleteContractSetBtn.addEventListener("click", () => {
 });
 
 // ==================================================
+// Zoom lock
+// ==================================================
+// iOS Safari deliberately ignores user-scalable=no in the viewport tag, so
+// pinch-zoom has to be blocked through WebKit's own gesture events. Combined
+// with touch-action: manipulation (double-tap) and 16px inputs (focus zoom),
+// this covers all three ways the page could otherwise scale.
+for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+  document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
+}
+
+// ==================================================
 // PWA: service worker + iOS "Add to Home Screen" banner
 // ==================================================
 if ("serviceWorker" in navigator) {
