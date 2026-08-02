@@ -348,11 +348,27 @@ function renderScorecardHeader(players) {
   }
 }
 
+// Shortens a contract like "2 sets of 3" to "2/3" so it fits the round column.
+// Contract text is user-editable, so anything that doesn't match returns null
+// and the row just shows its number.
+function abbreviateContract(text) {
+  const match = /^\s*(\d+)\s*sets?\s+of\s+(\d+)\s*$/i.exec(text || "");
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+// e.g. round 1 of the standard set -> "1. 2/3"
+function roundLabel(round) {
+  const contract = currentContracts[(round - 1) % currentContracts.length];
+  const abbr = abbreviateContract(contract);
+  return abbr ? `${round}. ${abbr}` : String(round);
+}
+
 async function refreshScorecardBody() {
   currentScores = await db.scores.where("gameId").equals(currentGameId).toArray();
   renderScorecardBody(currentPlayers, currentScores);
   renderScorecardTotals(currentPlayers, currentScores);
-  undoRoundBtn.disabled = currentScores.length === 0;
+  // Only truly nothing to undo when we're down to a single, unscored round.
+  undoRoundBtn.disabled = currentScores.length === 0 && scorecardRoundCount <= 1;
 }
 
 function renderScorecardBody(players, scores) {
@@ -361,10 +377,12 @@ function renderScorecardBody(players, scores) {
   scorecardBodyEl.innerHTML = "";
   for (let round = 1; round <= scorecardRoundCount; round++) {
     const tr = document.createElement("tr");
-    tr.appendChild(makeCell("td", String(round), "round-col"));
+    tr.appendChild(makeCell("td", roundLabel(round), "round-col"));
     for (const player of players) {
       const points = scoreByRoundAndPlayer.get(`${round}:${player.id}`);
-      const td = makeCell("td", points !== undefined ? String(points) : "", "score-cell");
+      const isEmpty = points === undefined;
+      const td = makeCell("td", isEmpty ? "–" : String(points), "score-cell");
+      if (isEmpty) td.classList.add("is-empty");
       td.dataset.round = String(round);
       tr.appendChild(td);
     }
@@ -396,16 +414,25 @@ scorecardBodyEl.addEventListener("click", (event) => {
 });
 
 function handleUndoLastRound() {
+  const maxScoredRound = currentScores.length ? Math.max(...currentScores.map((s) => s.roundIndex)) : 0;
+
+  // Trailing empty rounds come from tapping "Add Round" by mistake. There's
+  // nothing to lose, so drop the row straight away without asking.
+  if (scorecardRoundCount > maxScoredRound && scorecardRoundCount > 1) {
+    scorecardRoundCount--;
+    refreshScorecardBody();
+    return;
+  }
+
+  if (maxScoredRound === 0) return;
+
   // confirm() must run synchronously off the click, with no prior await —
   // otherwise iOS Safari can silently drop the dialog (the user gesture
   // that authorizes it expires once the code crosses an async boundary).
-  if (currentScores.length === 0) return;
-
-  const lastRound = Math.max(...currentScores.map((s) => s.roundIndex));
-  const confirmed = confirm(`Undo round ${lastRound}? This clears every player's score for that round.`);
+  const confirmed = confirm(`Undo round ${maxScoredRound}? This clears every player's score for that round.`);
   if (!confirmed) return;
 
-  deleteRound(lastRound);
+  deleteRound(maxScoredRound);
 }
 
 async function deleteRound(lastRound) {

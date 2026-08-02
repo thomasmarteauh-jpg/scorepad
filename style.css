@@ -44,8 +44,12 @@ body {
 /* ---- Layout ---- */
 .app-header {
   padding: 16px;
+  /* Push the title clear of the notch / Dynamic Island. env(safe-area-inset-top)
+     is the height the system reserves; it is 0 on devices without one. */
+  padding-top: calc(16px + env(safe-area-inset-top));
   text-align: center;
   border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .app-header h1 {
@@ -151,7 +155,7 @@ body {
 .fab {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   min-width: 44px;
   min-height: 44px;
@@ -327,10 +331,11 @@ body {
 }
 
 .scorecard-table .round-col {
-  min-width: 60px;
-  width: 60px;
+  min-width: 76px;
+  width: 76px;
   font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .scorecard-table thead th {
@@ -353,6 +358,19 @@ body {
 
 .scorecard-table td.score-cell:active {
   background: var(--border);
+}
+
+/* Empty cells show a faint dash so it reads as "tap here to fill in". */
+.scorecard-table td.score-cell.is-empty {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.scorecard-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .scorecard-table tfoot td {
