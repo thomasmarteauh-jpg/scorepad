@@ -116,6 +116,8 @@ async function handleRoute() {
     await enterSummaryScreen(Number(parts[1]));
   } else if (parts[0] === "settings") {
     await enterSettingsScreen();
+  } else if (parts[0] === "stats") {
+    await enterStatsScreen();
   } else if (parts[0] === "contract-set" && parts[1]) {
     await enterContractSetScreen(Number(parts[1]));
   } else {
@@ -381,7 +383,7 @@ async function enterNewGameScreen() {
 }
 
 async function populatePlayerDatalist() {
-  const players = await db.players.orderBy("name").toArray();
+  const players = (await db.players.orderBy("name").toArray()).filter((p) => !p.hidden);
   playerNamesDatalistEl.innerHTML = "";
   for (const player of players) {
     const option = document.createElement("option");
@@ -467,6 +469,8 @@ document.getElementById("start-game-btn").addEventListener("click", async () => 
   for (const name of names) {
     const existing = await db.players.where("name").equalsIgnoreCase(name).first();
     if (existing) {
+      // Someone hidden who's playing again clearly isn't retired after all.
+      if (existing.hidden) await db.players.update(existing.id, { hidden: false });
       playerIds.push(existing.id);
     } else {
       playerIds.push(await db.players.add({ name }));
@@ -871,7 +875,11 @@ async function enterSummaryScreen(gameId) {
 
   summaryTitleEl.textContent = game.name;
   renderStandings(players, scores, purchasePoints);
-  renderCumulativeChart(players, scores, purchasePoints);
+  // Purchases deliberately aren't plotted: a full set of buys can outweigh a
+  // player's entire round score, which squashed the actual round-by-round
+  // play into a sliver of the chart. They're shown as numbers in the
+  // standings breakdown instead, where they read exactly.
+  renderCumulativeChart(players, scores);
   toggleCompleteBtn.textContent = game.isComplete ? "Reopen Game" : "Mark Game Complete";
 
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
@@ -894,6 +902,8 @@ async function enterSummaryScreen(gameId) {
 
 function renderStandings(players, scores, purchasePoints) {
   const standings = computeStandings(players, scores, purchasePoints);
+  // Only worth breaking the total apart when buys actually contributed.
+  const anyBuys = standings.some((entry) => (purchasePoints && purchasePoints.get(entry.player.id)) || 0);
 
   standingsListEl.innerHTML = "";
   standings.forEach((entry, index) => {
@@ -902,13 +912,25 @@ function renderStandings(players, scores, purchasePoints) {
     if (index === 0) li.classList.add("is-winner");
 
     li.appendChild(makeCell("span", `${index + 1}.`, "standing-rank"));
-    li.appendChild(makeCell("span", entry.player.name, "standing-name"));
+
+    const nameWrap = document.createElement("div");
+    nameWrap.className = "standing-name";
+    nameWrap.appendChild(makeCell("span", entry.player.name));
+    if (anyBuys) {
+      const buyPoints = (purchasePoints && purchasePoints.get(entry.player.id)) || 0;
+      const roundPoints = entry.total - buyPoints;
+      nameWrap.appendChild(makeCell("span", `rounds ${roundPoints} · buys ${buyPoints}`, "standing-breakdown"));
+    }
+    li.appendChild(nameWrap);
+
     li.appendChild(makeCell("span", String(entry.total), "standing-total"));
     standingsListEl.appendChild(li);
   });
 }
 
-function renderCumulativeChart(players, scores, purchasePoints) {
+// Plots round scores only. See the note at the call site for why purchases
+// are left out.
+function renderCumulativeChart(players, scores) {
   chartLegendEl.innerHTML = "";
   const roundCount = scores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
 
@@ -918,9 +940,6 @@ function renderCumulativeChart(players, scores, purchasePoints) {
   }
 
   // cumulativeByPlayer[i] is that player's running total after each round, 1..roundCount.
-  // Purchase penalties aren't tied to any round, so they're applied at the end
-  // as an extra point sharing the last round's x position — drawn as a vertical
-  // jump up to the player's real total.
   const cumulativeByPlayer = players.map((player) => {
     let running = 0;
     const points = [];
@@ -929,8 +948,6 @@ function renderCumulativeChart(players, scores, purchasePoints) {
       running += roundScore ? roundScore.points : 0;
       points.push(running);
     }
-    const penalty = (purchasePoints && purchasePoints.get(player.id)) || 0;
-    if (penalty > 0) points.push(running + penalty);
     return points;
   });
 
@@ -953,11 +970,7 @@ function renderCumulativeChart(players, scores, purchasePoints) {
 
   players.forEach((player, i) => {
     const color = CHART_COLORS[i % CHART_COLORS.length];
-    // The trailing purchase point (if any) reuses the last round's x, so it
-    // renders as a vertical rise rather than extending the timeline.
-    const pointsAttr = cumulativeByPlayer[i]
-      .map((value, idx) => `${xFor(Math.min(idx + 1, roundCount))},${yFor(value)}`)
-      .join(" ");
+    const pointsAttr = cumulativeByPlayer[i].map((value, idx) => `${xFor(idx + 1)},${yFor(value)}`).join(" ");
     svg += `<polyline points="${pointsAttr}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
   });
 
@@ -987,8 +1000,10 @@ const newContractSetBtn = document.getElementById("new-contract-set-btn");
 const exportDataBtn = document.getElementById("export-data-btn");
 const importDataInput = document.getElementById("import-data-input");
 const dataStatusEl = document.getElementById("data-status");
+const toggleHiddenPlayersBtn = document.getElementById("toggle-hidden-players-btn");
 
 document.getElementById("settings-back-btn").addEventListener("click", () => navigate("games"));
+document.getElementById("stats-nav-btn").addEventListener("click", () => navigate("stats"));
 
 async function enterSettingsScreen() {
   showScreen("settings-screen");
@@ -997,16 +1012,23 @@ async function enterSettingsScreen() {
   await renderSettingsContractSets();
 }
 
+// Players are never deleted — hiding keeps their past games and stats intact
+// while taking them out of the list and the name suggestions.
+let showHiddenPlayers = false;
+
 async function renderSettingsPlayers() {
-  const players = await db.players.orderBy("name").toArray();
-  const games = await db.games.toArray();
-  const usedPlayerIds = new Set(games.flatMap((g) => g.playerIds));
+  const allPlayers = await db.players.orderBy("name").toArray();
+  const hiddenCount = allPlayers.filter((p) => p.hidden).length;
+  const players = showHiddenPlayers ? allPlayers : allPlayers.filter((p) => !p.hidden);
+
+  toggleHiddenPlayersBtn.hidden = hiddenCount === 0;
+  toggleHiddenPlayersBtn.textContent = showHiddenPlayers ? "Hide hidden" : `Show hidden (${hiddenCount})`;
 
   settingsPlayersListEl.innerHTML = "";
   if (players.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No players yet";
+    empty.textContent = allPlayers.length ? "All players are hidden" : "No players yet";
     settingsPlayersListEl.appendChild(empty);
     return;
   }
@@ -1014,6 +1036,7 @@ async function renderSettingsPlayers() {
   for (const player of players) {
     const row = document.createElement("div");
     row.className = "settings-row";
+    if (player.hidden) row.classList.add("is-hidden");
 
     const input = document.createElement("input");
     input.type = "text";
@@ -1028,25 +1051,26 @@ async function renderSettingsPlayers() {
       }
     });
 
-    const isUsed = usedPlayerIds.has(player.id);
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "settings-row-delete";
-    deleteBtn.textContent = "×";
-    deleteBtn.setAttribute("aria-label", `Delete ${player.name}`);
-    deleteBtn.disabled = isUsed;
-    if (isUsed) deleteBtn.title = "Can't delete a player who's already in a game";
-    deleteBtn.addEventListener("click", async () => {
-      if (!confirm(`Delete ${player.name}?`)) return;
-      await db.players.delete(player.id);
+    const actionBtn = document.createElement("button");
+    actionBtn.type = "button";
+    actionBtn.className = "settings-row-action";
+    actionBtn.textContent = player.hidden ? "Unhide" : "Hide";
+    actionBtn.setAttribute("aria-label", `${player.hidden ? "Unhide" : "Hide"} ${player.name}`);
+    actionBtn.addEventListener("click", async () => {
+      await db.players.update(player.id, { hidden: !player.hidden });
       await renderSettingsPlayers();
     });
 
     row.appendChild(input);
-    row.appendChild(deleteBtn);
+    row.appendChild(actionBtn);
     settingsPlayersListEl.appendChild(row);
   }
 }
+
+toggleHiddenPlayersBtn.addEventListener("click", () => {
+  showHiddenPlayers = !showHiddenPlayers;
+  renderSettingsPlayers();
+});
 
 async function renderSettingsContractSets() {
   const contractSets = await db.contractSets.toArray();
@@ -1072,6 +1096,123 @@ newContractSetBtn.addEventListener("click", async () => {
   });
   navigate(`contract-set/${id}`);
 });
+
+// ==================================================
+// Screen 7: player stats
+// ==================================================
+const statsListEl = document.getElementById("stats-list");
+
+document.getElementById("stats-back-btn").addEventListener("click", () => navigate("settings"));
+
+async function enterStatsScreen() {
+  showScreen("stats-screen");
+  const stats = await computePlayerStats();
+  renderPlayerStats(stats);
+}
+
+// Walks every game once, in memory, rather than querying per game.
+async function computePlayerStats() {
+  const [games, players, allScores, allPurchases, modes] = await Promise.all([
+    db.games.toArray(),
+    db.players.toArray(),
+    db.scores.toArray(),
+    db.purchases.toArray(),
+    db.contractSets.toArray(),
+  ]);
+
+  const playerById = new Map(players.map((p) => [p.id, p]));
+  const modeById = new Map(modes.map((m) => [m.id, m]));
+  const fallbackMode = modes[0];
+
+  const scoresByGame = new Map();
+  for (const score of allScores) {
+    if (!scoresByGame.has(score.gameId)) scoresByGame.set(score.gameId, []);
+    scoresByGame.get(score.gameId).push(score);
+  }
+  const purchasesByGame = new Map();
+  for (const row of allPurchases) {
+    if (!purchasesByGame.has(row.gameId)) purchasesByGame.set(row.gameId, []);
+    purchasesByGame.get(row.gameId).push(row);
+  }
+
+  const statByPlayerId = new Map();
+  const statFor = (playerId) => {
+    if (!statByPlayerId.has(playerId)) {
+      statByPlayerId.set(playerId, { player: playerById.get(playerId), played: 0, wins: 0, totalScore: 0, best: null, buys: 0 });
+    }
+    return statByPlayerId.get(playerId);
+  };
+
+  for (const game of games) {
+    const gameScores = scoresByGame.get(game.id) || [];
+    if (gameScores.length === 0) continue; // nothing was ever played
+
+    const mode = modeById.get(game.contractSetId) || fallbackMode;
+    const contracts = (mode && mode.contracts) || DEFAULT_CONTRACTS;
+    const maxRound = gameScores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+
+    // Counted when explicitly finished, or when it played out its full round list.
+    if (!game.isComplete && maxRound < contracts.length) continue;
+
+    const penalty = penaltyOf(mode);
+    const limit = purchaseLimitOf(mode);
+    const buysByPlayerId = new Map(
+      (purchasesByGame.get(game.id) || []).map((r) => [r.playerId, Math.min(r.count || 0, limit)])
+    );
+    const purchasePoints = new Map([...buysByPlayerId].map(([id, count]) => [id, count * penalty]));
+
+    const gamePlayers = game.playerIds.map((id) => playerById.get(id)).filter(Boolean);
+    if (gamePlayers.length === 0) continue;
+
+    const standings = computeStandings(gamePlayers, gameScores, purchasePoints);
+    const lowest = standings[0].total;
+
+    for (const entry of standings) {
+      const stat = statFor(entry.player.id);
+      stat.played++;
+      if (entry.total === lowest) stat.wins++; // ties all count as a win
+      stat.totalScore += entry.total;
+      stat.best = stat.best === null ? entry.total : Math.min(stat.best, entry.total);
+      stat.buys += buysByPlayerId.get(entry.player.id) || 0;
+    }
+  }
+
+  return [...statByPlayerId.values()]
+    .filter((stat) => stat.player && !stat.player.hidden)
+    .sort((a, b) => b.wins - a.wins || b.wins / b.played - a.wins / a.played || a.totalScore / a.played - b.totalScore / b.played);
+}
+
+function renderPlayerStats(stats) {
+  statsListEl.innerHTML = "";
+
+  if (stats.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No finished games yet";
+    statsListEl.appendChild(empty);
+    return;
+  }
+
+  for (const stat of stats) {
+    const card = document.createElement("div");
+    card.className = "stat-card";
+
+    card.appendChild(makeCell("div", stat.player.name, "stat-name"));
+
+    const winRate = Math.round((stat.wins / stat.played) * 100);
+    card.appendChild(
+      makeCell("span", `Played ${stat.played} · Won ${stat.wins} (${winRate}%)`, "stat-line")
+    );
+
+    const avgScore = Math.round(stat.totalScore / stat.played);
+    const avgBuys = (stat.buys / stat.played).toFixed(1);
+    card.appendChild(
+      makeCell("span", `Avg score ${avgScore} · Best ${stat.best} · Avg buys ${avgBuys}`, "stat-line")
+    );
+
+    statsListEl.appendChild(card);
+  }
+}
 
 exportDataBtn.addEventListener("click", async () => {
   const [games, players, scores, contractSets, purchases] = await Promise.all([

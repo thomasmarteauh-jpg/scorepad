@@ -120,7 +120,12 @@
         <h2>Settings</h2>
       </div>
 
-      <h3 class="settings-section-title">Players</h3>
+      <button type="button" id="stats-nav-btn" class="btn-secondary full-width-btn">Player Stats</button>
+
+      <div class="settings-section-head">
+        <h3 class="settings-section-title">Players</h3>
+        <button type="button" id="toggle-hidden-players-btn" class="link-btn"></button>
+      </div>
       <div id="settings-players-list" class="settings-list"></div>
 
       <h3 class="settings-section-title">Modes</h3>
@@ -135,6 +140,18 @@
         <input type="file" id="import-data-input" accept="application/json" hidden />
       </div>
       <p id="data-status" class="settings-hint" hidden></p>
+    </section>
+
+    <!-- Screen 7: per-player stats across games -->
+    <section id="stats-screen" class="screen">
+      <div class="scorecard-header">
+        <button type="button" id="stats-back-btn" class="btn-secondary">← Settings</button>
+        <h2>Player Stats</h2>
+      </div>
+      <p class="settings-hint">
+        Counts games marked complete, plus any that played out their full round list.
+      </p>
+      <div id="stats-list" class="stats-list"></div>
     </section>
 
     <!-- Screen 6: edit one mode -->

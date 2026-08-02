@@ -676,7 +676,15 @@ body {
 
 .standing-name {
   flex: 1;
+  min-width: 0;
   font-size: 1rem;
+}
+
+.standing-breakdown {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .standing-total {
@@ -751,20 +759,66 @@ body {
   flex: 1;
 }
 
-.settings-row-delete {
-  width: 44px;
+.settings-row-action {
+  min-width: 68px;
   height: 44px;
   flex-shrink: 0;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  color: var(--error);
-  font-size: 1.2rem;
+  color: var(--text);
+  font-size: 0.9rem;
 }
 
-.settings-row-delete:disabled {
-  opacity: 0.3;
+.settings-row.is-hidden .player-name-input {
+  opacity: 0.55;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+
+.settings-section-head .settings-section-title {
+  margin: 0;
+}
+
+.link-btn {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
+/* ---- Player stats ---- */
+.stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.stat-name {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.stat-line {
+  display: block;
+  margin-top: 4px;
   color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .contract-set-item {
