@@ -200,8 +200,13 @@ body {
   font-weight: 500;
 }
 
-.btn-secondary:active {
+.btn-secondary:active:not(:disabled) {
   background: var(--border);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.4;
 }
 
 /* ---- New Game screen ---- */

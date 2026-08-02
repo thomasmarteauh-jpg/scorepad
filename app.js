@@ -399,6 +399,7 @@ async function enterScorecardScreen(gameId) {
 
   backToGamesBtn.onclick = () => navigate("games");
   addRoundBtn.onclick = () => {
+    if (isAtFinalRound()) return;
     scorecardRoundCount++;
     refreshScorecardBody();
   };
@@ -422,11 +423,17 @@ function abbreviateContract(text) {
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
-// e.g. round 1 of the standard set -> "1. 2/3"
+// e.g. round 1 of the standard set -> "1. 2/3". A game can't run past its
+// mode's last round, so there's no wrapping; any round beyond the list (from
+// older data, or a mode that was shortened later) just shows its number.
 function roundLabel(round) {
-  const contract = currentContracts[(round - 1) % currentContracts.length];
-  const abbr = abbreviateContract(contract);
+  const abbr = abbreviateContract(currentContracts[round - 1]);
   return abbr ? `${round}. ${abbr}` : String(round);
+}
+
+// True once the game has reached the last round its mode defines.
+function isAtFinalRound() {
+  return scorecardRoundCount >= currentContracts.length;
 }
 
 async function refreshScorecardBody() {
@@ -441,8 +448,20 @@ async function refreshScorecardBody() {
   renderScorecardPurchases(currentPlayers);
   renderScorecardTotals(currentPlayers, currentScores);
   syncPurchasesRowOffset();
+  updateScorecardActions();
+}
+
+// At the mode's last round the game is over: it can't be extended or rewound,
+// and finishing up (View Summary) becomes the highlighted action.
+function updateScorecardActions() {
+  const finished = isAtFinalRound();
+
+  addRoundBtn.disabled = finished;
   // Only truly nothing to undo when we're down to a single, unscored round.
-  undoRoundBtn.disabled = currentScores.length === 0 && scorecardRoundCount <= 1;
+  undoRoundBtn.disabled = finished || (currentScores.length === 0 && scorecardRoundCount <= 1);
+
+  viewSummaryBtn.classList.toggle("btn-primary", finished);
+  viewSummaryBtn.classList.toggle("btn-secondary", !finished);
 }
 
 function renderScorecardBody(players, scores) {
@@ -559,6 +578,8 @@ scorecardBodyEl.addEventListener("click", (event) => {
 });
 
 function handleUndoLastRound() {
+  if (isAtFinalRound()) return;
+
   const maxScoredRound = currentScores.length ? Math.max(...currentScores.map((s) => s.roundIndex)) : 0;
 
   // Trailing empty rounds come from tapping "Add Round" by mistake. There's
@@ -682,6 +703,7 @@ const standingsListEl = document.getElementById("standings-list");
 const chartContainerEl = document.getElementById("chart-container");
 const chartLegendEl = document.getElementById("chart-legend");
 const toggleCompleteBtn = document.getElementById("toggle-complete-btn");
+const summaryNewGameBtn = document.getElementById("summary-new-game-btn");
 
 const CHART_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#9a6324"];
 
@@ -699,13 +721,24 @@ async function enterSummaryScreen(gameId) {
 
   summaryTitleEl.textContent = game.name;
   renderStandings(players, scores, purchasePoints);
-  renderCumulativeChart(players, scores);
+  renderCumulativeChart(players, scores, purchasePoints);
   toggleCompleteBtn.textContent = game.isComplete ? "Reopen Game" : "Mark Game Complete";
 
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
   toggleCompleteBtn.onclick = async () => {
     await db.games.update(gameId, { isComplete: !game.isComplete });
     await enterSummaryScreen(gameId);
+  };
+
+  summaryNewGameBtn.onclick = () => {
+    // Already finished? Nothing to ask about — just start the next game.
+    if (game.isComplete) {
+      navigate("new-game");
+      return;
+    }
+    // confirm() first, synchronously — see the note in handleUndoLastRound.
+    if (!confirm("Mark current game as complete?")) return;
+    db.games.update(gameId, { isComplete: true }).then(() => navigate("new-game"));
   };
 }
 
@@ -725,7 +758,7 @@ function renderStandings(players, scores, purchasePoints) {
   });
 }
 
-function renderCumulativeChart(players, scores) {
+function renderCumulativeChart(players, scores, purchasePoints) {
   chartLegendEl.innerHTML = "";
   const roundCount = scores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
 
@@ -735,8 +768,11 @@ function renderCumulativeChart(players, scores) {
   }
 
   // cumulativeByPlayer[i] is that player's running total after each round, 1..roundCount.
+  // Purchase penalties aren't tied to any round, so they're carried as a flat
+  // offset from the start: the round-to-round steps stay true to the scores
+  // while each line still ends on the player's real total.
   const cumulativeByPlayer = players.map((player) => {
-    let running = 0;
+    let running = (purchasePoints && purchasePoints.get(player.id)) || 0;
     const points = [];
     for (let round = 1; round <= roundCount; round++) {
       const roundScore = scores.find((s) => s.roundIndex === round && s.playerId === player.id);
