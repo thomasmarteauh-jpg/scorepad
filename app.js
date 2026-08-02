@@ -86,6 +86,13 @@ async function ensureDefaultContractSet() {
   }
 }
 
+// Keep in step with CACHE_VERSION in sw.js. Settings compares the two: this
+// one is whichever app.js the page actually loaded, while the cache version
+// reflects the service worker in charge. A mismatch means an update has been
+// fetched but the old worker is still serving, which is exactly the state
+// that used to be invisible.
+const APP_VERSION = "11";
+
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 
@@ -1072,6 +1079,8 @@ const dataStatusEl = document.getElementById("data-status");
 const toggleHiddenPlayersBtn = document.getElementById("toggle-hidden-players-btn");
 const storageStatusEl = document.getElementById("storage-status");
 const requestPersistBtn = document.getElementById("request-persist-btn");
+const versionInfoEl = document.getElementById("version-info");
+const versionNoteEl = document.getElementById("version-note");
 
 document.getElementById("settings-back-btn").addEventListener("click", () => navigate("games"));
 document.getElementById("stats-nav-btn").addEventListener("click", () => navigate("stats"));
@@ -1082,6 +1091,38 @@ async function enterSettingsScreen() {
   await renderSettingsPlayers();
   await renderSettingsContractSets();
   await renderStorageStatus();
+  await renderVersionInfo();
+}
+
+// ---- Version ----
+// Reads the live cache name rather than asking the worker, so it reports what
+// is actually installed on this device.
+async function activeCacheVersion() {
+  if (!window.caches) return null;
+  try {
+    const names = await caches.keys();
+    for (const name of names) {
+      const match = /^scorepad-cache-v(.+)$/.exec(name);
+      if (match) return match[1];
+    }
+  } catch (err) {
+    /* fall through */
+  }
+  return null;
+}
+
+async function renderVersionInfo() {
+  const cached = await activeCacheVersion();
+
+  if (cached && cached !== APP_VERSION) {
+    versionInfoEl.textContent = `Version ${APP_VERSION} · offline copy v${cached}`;
+    versionNoteEl.textContent = "An update is ready. Fully close the app and reopen it to finish.";
+    versionNoteEl.hidden = false;
+    return;
+  }
+
+  versionInfoEl.textContent = cached ? `Version ${APP_VERSION} · saved for offline use` : `Version ${APP_VERSION}`;
+  versionNoteEl.hidden = true;
 }
 
 // ---- Persistent storage ----

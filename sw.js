@@ -1,6 +1,8 @@
 // Bump this string any time index.html, style.css, app.js, or the icons
 // change. Doing so retires the old cache on activate; fetches are
 // network-first, so a running app picks up new files on its next load.
+// Bump APP_VERSION in app.js to match — Settings compares the two to show
+// whether a device has finished updating.
 const CACHE_VERSION = "v11";
 const CACHE_NAME = `scorepad-cache-${CACHE_VERSION}`;
 
