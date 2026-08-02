@@ -191,10 +191,66 @@ async function renderGamesList() {
     return;
   }
 
+  // Fetched once and grouped in memory rather than queried per game.
+  const [players, allScores, allPurchases, modes] = await Promise.all([
+    db.players.toArray(),
+    db.scores.toArray(),
+    db.purchases.toArray(),
+    db.contractSets.toArray(),
+  ]);
+
+  const ctx = {
+    playerById: new Map(players.map((p) => [p.id, p])),
+    modeById: new Map(modes.map((m) => [m.id, m])),
+    fallbackMode: modes[0],
+    scoresByGame: groupBy(allScores, "gameId"),
+    purchasesByGame: groupBy(allPurchases, "gameId"),
+  };
+
   for (const game of games) {
-    const winner = game.isComplete ? await getWinnerName(game) : null;
-    gamesListEl.appendChild(buildGameRow(game, winner));
+    gamesListEl.appendChild(buildGameRow(game, describeGame(game, ctx)));
   }
+}
+
+function groupBy(rows, key) {
+  const map = new Map();
+  for (const row of rows) {
+    if (!map.has(row[key])) map.set(row[key], []);
+    map.get(row[key]).push(row);
+  }
+  return map;
+}
+
+// The sub-line under a game's name: how far along it is, or who won.
+function describeGame(game, ctx) {
+  const gameScores = ctx.scoresByGame.get(game.id) || [];
+  const mode = ctx.modeById.get(game.contractSetId) || ctx.fallbackMode;
+  const contracts = (mode && mode.contracts) || DEFAULT_CONTRACTS;
+
+  if (game.isComplete) {
+    const winner = winnerNameFor(game, gameScores, mode, ctx);
+    return winner ? `Completed · Winner: ${winner}` : "Completed";
+  }
+
+  const roundsPlayed = gameScores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+  // The round they're on now, capped at the mode's last round.
+  const currentRound = Math.min(roundsPlayed + 1, contracts.length);
+  return `In progress · Round ${currentRound} of ${contracts.length}`;
+}
+
+function winnerNameFor(game, gameScores, mode, ctx) {
+  if (gameScores.length === 0) return null;
+
+  const penalty = penaltyOf(mode);
+  const limit = purchaseLimitOf(mode);
+  const purchasePoints = new Map(
+    (ctx.purchasesByGame.get(game.id) || []).map((r) => [r.playerId, Math.min(r.count || 0, limit) * penalty])
+  );
+
+  const gamePlayers = game.playerIds.map((id) => ctx.playerById.get(id)).filter(Boolean);
+  if (gamePlayers.length === 0) return null;
+
+  return computeStandings(gamePlayers, gameScores, purchasePoints)[0].player.name;
 }
 
 const PENCIL_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -203,7 +259,7 @@ const PENCIL_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden=
 
 // A game row is a swipeable card: the content slides left to reveal a red
 // Delete behind it, mirroring the iOS swipe-to-delete pattern.
-function buildGameRow(game, winner) {
+function buildGameRow(game, statusText) {
   const row = document.createElement("div");
   row.className = "game-row";
 
@@ -225,12 +281,7 @@ function buildGameRow(game, winner) {
   openBtn.type = "button";
   openBtn.className = "game-item";
   openBtn.textContent = game.name;
-  if (winner) {
-    const winnerEl = document.createElement("span");
-    winnerEl.className = "game-winner";
-    winnerEl.textContent = `Winner: ${winner}`;
-    openBtn.appendChild(winnerEl);
-  }
+  if (statusText) openBtn.appendChild(makeCell("span", statusText, "game-status"));
   openBtn.addEventListener("click", () => {
     // A swipe shouldn't also open the game; and while open, a tap just closes.
     if (row.dataset.suppressClick || row.classList.contains("is-open")) {
@@ -348,14 +399,6 @@ async function deleteGame(gameId) {
   await renderGamesList();
 }
 
-async function getWinnerName(game) {
-  const players = await Promise.all(game.playerIds.map((id) => db.players.get(id)));
-  const scores = await db.scores.where("gameId").equals(game.id).toArray();
-  const purchasePoints = await getPurchasePointsForGame(game);
-  const standings = computeStandings(players, scores, purchasePoints);
-  return standings.length ? standings[0].player.name : null;
-}
-
 newGameBtn.addEventListener("click", () => navigate("new-game"));
 document.getElementById("settings-nav-btn").addEventListener("click", () => navigate("settings"));
 
@@ -372,10 +415,29 @@ const newGameErrorEl = document.getElementById("new-game-error");
 
 let playerCount = 4;
 
+// Names already taken, loaded when the screen opens so the suggested name can
+// be built synchronously — prompt() can't wait on a query. See the note in
+// handleUndoLastRound about async gaps breaking dialogs on iOS.
+let existingGameNames = new Set();
+
+// Includes the time, not just the date, so two games on the same evening
+// aren't identically named. Two within the same minute get a counter.
+function defaultGameName(date) {
+  const day = date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const base = `Game — ${day}, ${time}`;
+
+  if (!existingGameNames.has(base)) return base;
+  let suffix = 2;
+  while (existingGameNames.has(`${base} (${suffix})`)) suffix++;
+  return `${base} (${suffix})`;
+}
+
 async function enterNewGameScreen() {
   showScreen("new-game-screen");
   playerCount = 4;
   newGameErrorEl.hidden = true;
+  existingGameNames = new Set((await db.games.toArray()).map((g) => g.name));
   await populatePlayerDatalist();
   await populateContractSetSelect();
   renderPlayerNameFields();
@@ -463,6 +525,15 @@ document.getElementById("start-game-btn").addEventListener("click", async () => 
 
   newGameErrorEl.hidden = true;
 
+  // prompt() runs before any await — see the note in handleUndoLastRound about
+  // async gaps breaking dialogs on iOS. The suggested name carries the time as
+  // well as the date, so two games on the same day stay tellable apart.
+  const createdAt = new Date();
+  const suggestedName = defaultGameName(createdAt);
+  const enteredName = prompt("Name this game", suggestedName);
+  // Backing out of the naming shouldn't discard the line-up they just entered.
+  const gameName = (enteredName === null ? suggestedName : enteredName.trim()) || suggestedName;
+
   // Reuse an existing player record if the name matches one we already know,
   // otherwise create a new player. This is what powers the autocomplete list.
   const playerIds = [];
@@ -477,15 +548,9 @@ document.getElementById("start-game-btn").addEventListener("click", async () => 
     }
   }
 
-  const gameName = `Game — ${new Date().toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })}`;
-
   const gameId = await db.games.add({
     name: gameName,
-    createdAt: Date.now(),
+    createdAt: createdAt.getTime(),
     playerIds,
     contractSetId: Number(contractSetSelectEl.value),
     isComplete: false,

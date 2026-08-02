@@ -128,7 +128,7 @@ body {
   gap: 12px;
 }
 
-.game-winner {
+.game-status {
   display: block;
   margin-top: 4px;
   color: var(--muted);
