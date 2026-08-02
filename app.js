@@ -190,24 +190,160 @@ async function renderGamesList() {
   }
 
   for (const game of games) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "game-item";
-    btn.textContent = game.name;
+    const winner = game.isComplete ? await getWinnerName(game) : null;
+    gamesListEl.appendChild(buildGameRow(game, winner));
+  }
+}
 
-    if (game.isComplete) {
-      const winner = await getWinnerName(game);
-      if (winner) {
-        const winnerEl = document.createElement("span");
-        winnerEl.className = "game-winner";
-        winnerEl.textContent = `Winner: ${winner}`;
-        btn.appendChild(winnerEl);
+const PENCIL_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+  <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+</svg>`;
+
+// A game row is a swipeable card: the content slides left to reveal a red
+// Delete behind it, mirroring the iOS swipe-to-delete pattern.
+function buildGameRow(game, winner) {
+  const row = document.createElement("div");
+  row.className = "game-row";
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "game-row-delete";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.setAttribute("aria-label", `Delete ${game.name}`);
+  deleteBtn.addEventListener("click", () => {
+    // confirm() first, synchronously — see the note in handleUndoLastRound.
+    if (!confirm(`Delete "${game.name}"? This also removes its scores.`)) return;
+    deleteGame(game.id);
+  });
+
+  const content = document.createElement("div");
+  content.className = "game-row-content";
+
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "game-item";
+  openBtn.textContent = game.name;
+  if (winner) {
+    const winnerEl = document.createElement("span");
+    winnerEl.className = "game-winner";
+    winnerEl.textContent = `Winner: ${winner}`;
+    openBtn.appendChild(winnerEl);
+  }
+  openBtn.addEventListener("click", () => {
+    // A swipe shouldn't also open the game; and while open, a tap just closes.
+    if (row.dataset.suppressClick || row.classList.contains("is-open")) {
+      setRowOpen(row, false);
+      return;
+    }
+    navigate(`scorecard/${game.id}`);
+  });
+
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "game-edit-btn";
+  editBtn.innerHTML = PENCIL_SVG;
+  editBtn.setAttribute("aria-label", `Rename ${game.name}`);
+  editBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (row.dataset.suppressClick) return;
+    // prompt() first, synchronously — same iOS gesture rule as confirm().
+    const next = prompt("Rename game", game.name);
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    db.games.update(game.id, { name: trimmed }).then(renderGamesList);
+  });
+
+  content.appendChild(openBtn);
+  content.appendChild(editBtn);
+  row.appendChild(deleteBtn);
+  row.appendChild(content);
+  attachSwipeToDelete(row, content);
+  return row;
+}
+
+const SWIPE_OPEN_X = -88;
+
+function setRowOpen(row, open) {
+  const content = row.querySelector(".game-row-content");
+  row.classList.toggle("is-open", open);
+  content.style.transform = `translateX(${open ? SWIPE_OPEN_X : 0}px)`;
+}
+
+function closeAllGameRows(except) {
+  for (const row of gamesListEl.querySelectorAll(".game-row.is-open")) {
+    if (row !== except) setRowOpen(row, false);
+  }
+}
+
+function attachSwipeToDelete(row, content) {
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  let axisDecided = false;
+  let horizontal = false;
+  let offset = 0;
+
+  content.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    startX = event.clientX;
+    startY = event.clientY;
+    tracking = true;
+    axisDecided = false;
+    horizontal = false;
+    offset = row.classList.contains("is-open") ? SWIPE_OPEN_X : 0;
+    content.style.transition = "none";
+  });
+
+  content.addEventListener("pointermove", (event) => {
+    if (!tracking) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+
+    if (!axisDecided) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      axisDecided = true;
+      // A mostly-vertical drag is the user scrolling the list; leave it alone.
+      horizontal = Math.abs(dx) > Math.abs(dy);
+      if (horizontal) {
+        closeAllGameRows(row);
+        try {
+          content.setPointerCapture(event.pointerId);
+        } catch (err) {
+          /* capture is a nicety; the drag still tracks without it */
+        }
       }
     }
+    if (!horizontal) return;
 
-    btn.addEventListener("click", () => navigate(`scorecard/${game.id}`));
-    gamesListEl.appendChild(btn);
-  }
+    const base = row.classList.contains("is-open") ? SWIPE_OPEN_X : 0;
+    offset = Math.max(SWIPE_OPEN_X, Math.min(0, base + dx));
+    content.style.transform = `translateX(${offset}px)`;
+  });
+
+  const settle = () => {
+    if (!tracking) return;
+    tracking = false;
+    content.style.transition = "";
+    if (!horizontal) return;
+
+    setRowOpen(row, offset < SWIPE_OPEN_X / 2);
+    // Swallow the click that the browser fires at the end of a drag.
+    row.dataset.suppressClick = "1";
+    setTimeout(() => delete row.dataset.suppressClick, 60);
+  };
+
+  content.addEventListener("pointerup", settle);
+  content.addEventListener("pointercancel", settle);
+}
+
+async function deleteGame(gameId) {
+  await db.transaction("rw", db.games, db.scores, db.purchases, async () => {
+    await db.scores.where("gameId").equals(gameId).delete();
+    await db.purchases.where("gameId").equals(gameId).delete();
+    await db.games.delete(gameId);
+  });
+  await renderGamesList();
 }
 
 async function getWinnerName(game) {
@@ -451,14 +587,15 @@ async function refreshScorecardBody() {
   updateScorecardActions();
 }
 
-// At the mode's last round the game is over: it can't be extended or rewound,
-// and finishing up (View Summary) becomes the highlighted action.
+// At the mode's last round the game can't be extended any further, and
+// finishing up (View Summary) becomes the highlighted action. Undo stays
+// available so a final round reached by accident can still be walked back.
 function updateScorecardActions() {
   const finished = isAtFinalRound();
 
   addRoundBtn.disabled = finished;
   // Only truly nothing to undo when we're down to a single, unscored round.
-  undoRoundBtn.disabled = finished || (currentScores.length === 0 && scorecardRoundCount <= 1);
+  undoRoundBtn.disabled = currentScores.length === 0 && scorecardRoundCount <= 1;
 
   viewSummaryBtn.classList.toggle("btn-primary", finished);
   viewSummaryBtn.classList.toggle("btn-secondary", !finished);
@@ -578,8 +715,6 @@ scorecardBodyEl.addEventListener("click", (event) => {
 });
 
 function handleUndoLastRound() {
-  if (isAtFinalRound()) return;
-
   const maxScoredRound = currentScores.length ? Math.max(...currentScores.map((s) => s.roundIndex)) : 0;
 
   // Trailing empty rounds come from tapping "Add Round" by mistake. There's
@@ -768,17 +903,19 @@ function renderCumulativeChart(players, scores, purchasePoints) {
   }
 
   // cumulativeByPlayer[i] is that player's running total after each round, 1..roundCount.
-  // Purchase penalties aren't tied to any round, so they're carried as a flat
-  // offset from the start: the round-to-round steps stay true to the scores
-  // while each line still ends on the player's real total.
+  // Purchase penalties aren't tied to any round, so they're applied at the end
+  // as an extra point sharing the last round's x position — drawn as a vertical
+  // jump up to the player's real total.
   const cumulativeByPlayer = players.map((player) => {
-    let running = (purchasePoints && purchasePoints.get(player.id)) || 0;
+    let running = 0;
     const points = [];
     for (let round = 1; round <= roundCount; round++) {
       const roundScore = scores.find((s) => s.roundIndex === round && s.playerId === player.id);
       running += roundScore ? roundScore.points : 0;
       points.push(running);
     }
+    const penalty = (purchasePoints && purchasePoints.get(player.id)) || 0;
+    if (penalty > 0) points.push(running + penalty);
     return points;
   });
 
@@ -801,7 +938,11 @@ function renderCumulativeChart(players, scores, purchasePoints) {
 
   players.forEach((player, i) => {
     const color = CHART_COLORS[i % CHART_COLORS.length];
-    const pointsAttr = cumulativeByPlayer[i].map((value, idx) => `${xFor(idx + 1)},${yFor(value)}`).join(" ");
+    // The trailing purchase point (if any) reuses the last round's x, so it
+    // renders as a vertical rise rather than extending the timeline.
+    const pointsAttr = cumulativeByPlayer[i]
+      .map((value, idx) => `${xFor(Math.min(idx + 1, roundCount))},${yFor(value)}`)
+      .join(" ");
     svg += `<polyline points="${pointsAttr}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
   });
 
