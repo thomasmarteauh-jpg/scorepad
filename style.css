@@ -383,6 +383,56 @@ body {
   z-index: 2;
 }
 
+/* The purchases row sits above the totals row; its exact offset from the
+   bottom is set in JS from the totals row's measured height. */
+#scorecard-purchases-row td {
+  padding: 6px 3px;
+}
+
+#scorecard-totals-row td {
+  bottom: 0;
+  border-top: 1px solid var(--border);
+}
+
+.scorecard-table .purchases-label {
+  font-size: 0.78rem;
+}
+
+.purchase-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.purchase-btn {
+  width: 28px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.purchase-btn:active:not(:disabled) {
+  background: var(--border);
+}
+
+.purchase-btn:disabled {
+  opacity: 0.3;
+}
+
+.purchase-value {
+  min-width: 20px;
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .scorecard-table tfoot td.leader-total {
   color: var(--accent);
 }

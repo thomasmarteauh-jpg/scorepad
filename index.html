@@ -53,7 +53,7 @@
       <datalist id="player-names-datalist"></datalist>
 
       <div class="field">
-        <label for="contract-set-select">Contract set</label>
+        <label for="contract-set-select">Mode</label>
         <select id="contract-set-select" class="select-input"></select>
       </div>
 
@@ -79,6 +79,7 @@
           </thead>
           <tbody id="scorecard-body"></tbody>
           <tfoot>
+            <tr id="scorecard-purchases-row"></tr>
             <tr id="scorecard-totals-row"></tr>
           </tfoot>
         </table>
@@ -108,7 +109,7 @@
       <button type="button" id="toggle-complete-btn" class="btn-secondary full-width-btn"></button>
     </section>
 
-    <!-- Screen 5: settings (players + contract sets + data) -->
+    <!-- Screen 5: settings (players + modes + data) -->
     <section id="settings-screen" class="screen">
       <div class="scorecard-header">
         <button type="button" id="settings-back-btn" class="btn-secondary">← Games</button>
@@ -118,12 +119,12 @@
       <h3 class="settings-section-title">Players</h3>
       <div id="settings-players-list" class="settings-list"></div>
 
-      <h3 class="settings-section-title">Contract Sets</h3>
+      <h3 class="settings-section-title">Modes</h3>
       <div id="settings-contract-sets-list" class="settings-list"></div>
-      <button type="button" id="new-contract-set-btn" class="btn-secondary full-width-btn">+ New Contract Set</button>
+      <button type="button" id="new-contract-set-btn" class="btn-secondary full-width-btn">+ New Mode</button>
 
       <h3 class="settings-section-title">Data</h3>
-      <p class="settings-hint">Back up all games, players, and contract sets to a file, or restore from one.</p>
+      <p class="settings-hint">Back up all games, players, and modes to a file, or restore from one.</p>
       <div class="data-actions">
         <button type="button" id="export-data-btn" class="btn-secondary">Export Data</button>
         <label for="import-data-input" class="btn-secondary file-label">Import Data</label>
@@ -132,11 +133,11 @@
       <p id="data-status" class="settings-hint" hidden></p>
     </section>
 
-    <!-- Screen 6: edit one contract set -->
+    <!-- Screen 6: edit one mode -->
     <section id="contract-set-screen" class="screen">
       <div class="scorecard-header">
         <button type="button" id="contract-set-back-btn" class="btn-secondary">← Settings</button>
-        <h2>Edit Contract Set</h2>
+        <h2>Edit Mode</h2>
       </div>
 
       <div class="field">
@@ -147,8 +148,31 @@
       <div id="contract-rounds-list" class="contract-rounds-list"></div>
       <button type="button" id="add-contract-round-btn" class="btn-secondary full-width-btn">+ Add Round</button>
 
+      <h3 class="settings-section-title">Purchases</h3>
+      <div class="field">
+        <label for="purchases-per-player-input">Purchases per player per set</label>
+        <input
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          id="purchases-per-player-input"
+          class="player-name-input"
+        />
+      </div>
+      <div class="field">
+        <label for="penalty-per-purchase-input">Penalty value per purchase</label>
+        <input
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          id="penalty-per-purchase-input"
+          class="player-name-input"
+        />
+        <p class="settings-hint">Points added to a player's score for each purchase they use.</p>
+      </div>
+
       <div class="form-actions">
-        <button type="button" id="delete-contract-set-btn" class="btn-secondary">Delete Set</button>
+        <button type="button" id="delete-contract-set-btn" class="btn-secondary">Delete Mode</button>
         <button type="button" id="save-contract-set-btn" class="btn-primary">Save</button>
       </div>
     </section>

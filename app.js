@@ -24,6 +24,27 @@ db.version(3).stores({
   contractSets: "++id, name",
 });
 
+// A "mode" (stored in the contractSets table) is a named round list plus its
+// purchase rules. Purchases are counted once per player for the whole game —
+// they don't reset each round — and each one adds a penalty to that player's total.
+db.version(4)
+  .stores({
+    games: "++id, name, createdAt, isComplete",
+    players: "++id, name",
+    scores: "++id, gameId, roundIndex, playerId, [gameId+roundIndex], [gameId+roundIndex+playerId]",
+    contractSets: "++id, name",
+    purchases: "++id, gameId, playerId, [gameId+playerId]",
+  })
+  .upgrade((tx) =>
+    tx
+      .table("contractSets")
+      .toCollection()
+      .modify((set) => {
+        if (set.purchasesPerPlayer === undefined) set.purchasesPerPlayer = DEFAULT_PURCHASES_PER_PLAYER;
+        if (set.penaltyPerPurchase === undefined) set.penaltyPerPurchase = DEFAULT_PENALTY_PER_PURCHASE;
+      })
+  );
+
 const DEFAULT_CONTRACTS = [
   "2 sets of 3",
   "1 set of 4",
@@ -33,10 +54,35 @@ const DEFAULT_CONTRACTS = [
   "1 set of 6",
 ];
 
+const DEFAULT_PURCHASES_PER_PLAYER = 5;
+const DEFAULT_PENALTY_PER_PURCHASE = 20;
+
+// Modes saved before purchases existed (or restored from an older backup)
+// won't have these fields, so always read them through these helpers.
+function purchaseLimitOf(mode) {
+  const value = mode && mode.purchasesPerPlayer;
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_PURCHASES_PER_PLAYER;
+}
+
+function penaltyOf(mode) {
+  const value = mode && mode.penaltyPerPurchase;
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_PENALTY_PER_PURCHASE;
+}
+
+function parseNonNegativeInt(text, fallback) {
+  const value = parseInt(String(text).trim(), 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 async function ensureDefaultContractSet() {
   const count = await db.contractSets.count();
   if (count === 0) {
-    await db.contractSets.add({ name: "Standard", contracts: DEFAULT_CONTRACTS.slice() });
+    await db.contractSets.add({
+      name: "Standard",
+      contracts: DEFAULT_CONTRACTS.slice(),
+      purchasesPerPlayer: DEFAULT_PURCHASES_PER_PLAYER,
+      penaltyPerPurchase: DEFAULT_PENALTY_PER_PURCHASE,
+    });
   }
 }
 
@@ -80,10 +126,14 @@ async function handleRoute() {
 window.addEventListener("hashchange", handleRoute);
 
 // Ranks players lowest-total-first (lowest total wins).
-function computeStandings(players, scores) {
+// purchasePoints maps a playerId to the penalty points they've accrued from
+// purchases; pass it wherever totals need to match the scorecard's Total row.
+function computeStandings(players, scores, purchasePoints) {
   const standings = players.map((player) => ({
     player,
-    total: scores.filter((s) => s.playerId === player.id).reduce((sum, s) => sum + s.points, 0),
+    total:
+      scores.filter((s) => s.playerId === player.id).reduce((sum, s) => sum + s.points, 0) +
+      ((purchasePoints && purchasePoints.get(player.id)) || 0),
   }));
   standings.sort((a, b) => a.total - b.total);
   return standings;
@@ -94,6 +144,26 @@ function makeCell(tag, text, className) {
   el.textContent = text;
   if (className) el.className = className;
   return el;
+}
+
+// Resolves the mode a game is played under, falling back to the first mode
+// available if the game predates modes or its mode was deleted.
+async function getModeForGame(game) {
+  let mode = game.contractSetId ? await db.contractSets.get(game.contractSetId) : null;
+  if (!mode) {
+    mode = await db.contractSets.orderBy("id").first();
+  }
+  return mode || { name: "Standard", contracts: DEFAULT_CONTRACTS };
+}
+
+// playerId -> penalty points owed for purchases in this game.
+async function getPurchasePointsForGame(game, mode) {
+  const resolvedMode = mode || (await getModeForGame(game));
+  const penalty = penaltyOf(resolvedMode);
+  const limit = purchaseLimitOf(resolvedMode);
+  const rows = await db.purchases.where("gameId").equals(game.id).toArray();
+  // Clamp in case the mode's limit was lowered after purchases were recorded.
+  return new Map(rows.map((r) => [r.playerId, Math.min(r.count || 0, limit) * penalty]));
 }
 
 // ==================================================
@@ -143,7 +213,8 @@ async function renderGamesList() {
 async function getWinnerName(game) {
   const players = await Promise.all(game.playerIds.map((id) => db.players.get(id)));
   const scores = await db.scores.where("gameId").equals(game.id).toArray();
-  const standings = computeStandings(players, scores);
+  const purchasePoints = await getPurchasePointsForGame(game);
+  const standings = computeStandings(players, scores, purchasePoints);
   return standings.length ? standings[0].player.name : null;
 }
 
@@ -289,6 +360,7 @@ document.getElementById("start-game-btn").addEventListener("click", async () => 
 const scorecardTitleEl = document.getElementById("scorecard-title");
 const scorecardHeaderRowEl = document.getElementById("scorecard-header-row");
 const scorecardBodyEl = document.getElementById("scorecard-body");
+const scorecardPurchasesRowEl = document.getElementById("scorecard-purchases-row");
 const scorecardTotalsRowEl = document.getElementById("scorecard-totals-row");
 const addRoundBtn = document.getElementById("add-round-btn");
 const undoRoundBtn = document.getElementById("undo-round-btn");
@@ -297,19 +369,11 @@ const viewSummaryBtn = document.getElementById("view-summary-btn");
 
 let currentGameId = null;
 let currentPlayers = [];
+let currentMode = null;
 let currentContracts = DEFAULT_CONTRACTS;
 let currentScores = [];
+let currentPurchaseCounts = new Map();
 let scorecardRoundCount = 1;
-
-// Looks up the contract list for a game, falling back to the first available
-// contract set if the game predates contract sets or its set was deleted.
-async function getContractsForGame(game) {
-  let contractSet = game.contractSetId ? await db.contractSets.get(game.contractSetId) : null;
-  if (!contractSet) {
-    contractSet = await db.contractSets.orderBy("id").first();
-  }
-  return contractSet ? contractSet.contracts : DEFAULT_CONTRACTS;
-}
 
 async function enterScorecardScreen(gameId) {
   const game = await db.games.get(gameId);
@@ -321,7 +385,9 @@ async function enterScorecardScreen(gameId) {
   showScreen("scorecard-screen");
   currentGameId = gameId;
   currentPlayers = await Promise.all(game.playerIds.map((id) => db.players.get(id)));
-  currentContracts = await getContractsForGame(game);
+  currentMode = await getModeForGame(game);
+  currentContracts =
+    Array.isArray(currentMode.contracts) && currentMode.contracts.length ? currentMode.contracts : DEFAULT_CONTRACTS;
   scorecardTitleEl.textContent = game.name;
 
   const scores = await db.scores.where("gameId").equals(gameId).toArray();
@@ -365,8 +431,16 @@ function roundLabel(round) {
 
 async function refreshScorecardBody() {
   currentScores = await db.scores.where("gameId").equals(currentGameId).toArray();
+
+  const limit = purchaseLimitOf(currentMode);
+  const purchaseRows = await db.purchases.where("gameId").equals(currentGameId).toArray();
+  // Clamp in case the mode's limit was lowered after purchases were recorded.
+  currentPurchaseCounts = new Map(purchaseRows.map((r) => [r.playerId, Math.min(r.count || 0, limit)]));
+
   renderScorecardBody(currentPlayers, currentScores);
+  renderScorecardPurchases(currentPlayers);
   renderScorecardTotals(currentPlayers, currentScores);
+  syncPurchasesRowOffset();
   // Only truly nothing to undo when we're down to a single, unscored round.
   undoRoundBtn.disabled = currentScores.length === 0 && scorecardRoundCount <= 1;
 }
@@ -390,9 +464,80 @@ function renderScorecardBody(players, scores) {
   }
 }
 
+// One stepper per player, counting purchases for the whole game (they don't
+// reset between rounds). Each purchase adds the mode's penalty to the total.
+function renderScorecardPurchases(players) {
+  const limit = purchaseLimitOf(currentMode);
+
+  scorecardPurchasesRowEl.innerHTML = "";
+  scorecardPurchasesRowEl.appendChild(makeCell("td", "Purchases", "round-col purchases-label"));
+
+  for (const player of players) {
+    const count = currentPurchaseCounts.get(player.id) || 0;
+
+    const stepper = document.createElement("div");
+    stepper.className = "purchase-stepper";
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.className = "purchase-btn";
+    downBtn.textContent = "▼";
+    downBtn.setAttribute("aria-label", `One fewer purchase for ${player.name}`);
+    downBtn.disabled = count <= 0;
+    downBtn.addEventListener("click", () => setPurchaseCount(player.id, count - 1));
+
+    const value = makeCell("span", String(count), "purchase-value");
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.className = "purchase-btn";
+    upBtn.textContent = "▲";
+    upBtn.setAttribute("aria-label", `One more purchase for ${player.name}`);
+    upBtn.disabled = count >= limit;
+    upBtn.addEventListener("click", () => setPurchaseCount(player.id, count + 1));
+
+    stepper.appendChild(downBtn);
+    stepper.appendChild(value);
+    stepper.appendChild(upBtn);
+
+    const td = document.createElement("td");
+    td.className = "purchases-cell";
+    td.appendChild(stepper);
+    scorecardPurchasesRowEl.appendChild(td);
+  }
+}
+
+async function setPurchaseCount(playerId, count) {
+  const limit = purchaseLimitOf(currentMode);
+  const clamped = Math.max(0, Math.min(count, limit));
+
+  const existing = await db.purchases.where("[gameId+playerId]").equals([currentGameId, playerId]).first();
+  if (existing) {
+    await db.purchases.update(existing.id, { count: clamped });
+  } else {
+    await db.purchases.add({ gameId: currentGameId, playerId, count: clamped });
+  }
+
+  await refreshScorecardBody();
+}
+
+// The footer has two sticky rows, so the purchases row has to sit exactly one
+// totals-row height above the bottom rather than at 0.
+function syncPurchasesRowOffset() {
+  requestAnimationFrame(() => {
+    const totalsHeight = scorecardTotalsRowEl.getBoundingClientRect().height;
+    for (const td of scorecardPurchasesRowEl.children) {
+      td.style.bottom = `${totalsHeight}px`;
+    }
+  });
+}
+
 function renderScorecardTotals(players, scores) {
-  const totals = players.map((player) =>
-    scores.filter((s) => s.playerId === player.id).reduce((sum, s) => sum + s.points, 0)
+  const penalty = penaltyOf(currentMode);
+  const totals = players.map(
+    (player) =>
+      scores.filter((s) => s.playerId === player.id).reduce((sum, s) => sum + s.points, 0) +
+      (currentPurchaseCounts.get(player.id) || 0) * penalty
   );
   const lowestTotal = totals.length ? Math.min(...totals) : 0;
 
@@ -550,9 +695,10 @@ async function enterSummaryScreen(gameId) {
   showScreen("summary-screen");
   const players = await Promise.all(game.playerIds.map((id) => db.players.get(id)));
   const scores = await db.scores.where("gameId").equals(gameId).toArray();
+  const purchasePoints = await getPurchasePointsForGame(game);
 
   summaryTitleEl.textContent = game.name;
-  renderStandings(players, scores);
+  renderStandings(players, scores, purchasePoints);
   renderCumulativeChart(players, scores);
   toggleCompleteBtn.textContent = game.isComplete ? "Reopen Game" : "Mark Game Complete";
 
@@ -563,8 +709,8 @@ async function enterSummaryScreen(gameId) {
   };
 }
 
-function renderStandings(players, scores) {
-  const standings = computeStandings(players, scores);
+function renderStandings(players, scores, purchasePoints) {
+  const standings = computeStandings(players, scores, purchasePoints);
 
   standingsListEl.innerHTML = "";
   standings.forEach((entry, index) => {
@@ -726,19 +872,33 @@ async function renderSettingsContractSets() {
 }
 
 newContractSetBtn.addEventListener("click", async () => {
-  const id = await db.contractSets.add({ name: "New Set", contracts: ["Round 1"] });
+  const id = await db.contractSets.add({
+    name: "New Mode",
+    contracts: ["Round 1"],
+    purchasesPerPlayer: DEFAULT_PURCHASES_PER_PLAYER,
+    penaltyPerPurchase: DEFAULT_PENALTY_PER_PURCHASE,
+  });
   navigate(`contract-set/${id}`);
 });
 
 exportDataBtn.addEventListener("click", async () => {
-  const [games, players, scores, contractSets] = await Promise.all([
+  const [games, players, scores, contractSets, purchases] = await Promise.all([
     db.games.toArray(),
     db.players.toArray(),
     db.scores.toArray(),
     db.contractSets.toArray(),
+    db.purchases.toArray(),
   ]);
 
-  const payload = { exportedAt: new Date().toISOString(), version: 1, games, players, scores, contractSets };
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    version: 2,
+    games,
+    players,
+    scores,
+    contractSets,
+    purchases,
+  };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
 
@@ -758,7 +918,7 @@ importDataInput.addEventListener("change", async () => {
   // confirm() runs first, synchronously, before any await — see the note in
   // handleUndoLastRound about async gaps breaking the dialog on iOS.
   const confirmed = confirm(
-    "Importing will replace all games, players, and contract sets currently saved in this browser. Continue?"
+    "Importing will replace all games, players, and modes currently saved in this browser. Continue?"
   );
   if (!confirmed) {
     importDataInput.value = "";
@@ -772,13 +932,23 @@ importDataInput.addEventListener("change", async () => {
       throw new Error("This file doesn't look like a ScorePad export.");
     }
 
-    await db.transaction("rw", db.games, db.players, db.scores, db.contractSets, async () => {
-      await Promise.all([db.games.clear(), db.players.clear(), db.scores.clear(), db.contractSets.clear()]);
+    // Backups made before purchases existed simply have none.
+    const purchases = Array.isArray(payload.purchases) ? payload.purchases : [];
+
+    await db.transaction("rw", db.games, db.players, db.scores, db.contractSets, db.purchases, async () => {
+      await Promise.all([
+        db.games.clear(),
+        db.players.clear(),
+        db.scores.clear(),
+        db.contractSets.clear(),
+        db.purchases.clear(),
+      ]);
       await Promise.all([
         db.games.bulkAdd(payload.games),
         db.players.bulkAdd(payload.players),
         db.scores.bulkAdd(payload.scores),
         db.contractSets.bulkAdd(payload.contractSets),
+        db.purchases.bulkAdd(purchases),
       ]);
     });
     await ensureDefaultContractSet();
@@ -796,13 +966,15 @@ importDataInput.addEventListener("change", async () => {
 });
 
 // ==================================================
-// Screen 6: edit one contract set
+// Screen 6: edit one mode
 // ==================================================
 const contractSetNameInput = document.getElementById("contract-set-name-input");
 const contractRoundsListEl = document.getElementById("contract-rounds-list");
 const addContractRoundBtn = document.getElementById("add-contract-round-btn");
 const saveContractSetBtn = document.getElementById("save-contract-set-btn");
 const deleteContractSetBtn = document.getElementById("delete-contract-set-btn");
+const purchasesPerPlayerInput = document.getElementById("purchases-per-player-input");
+const penaltyPerPurchaseInput = document.getElementById("penalty-per-purchase-input");
 
 document.getElementById("contract-set-back-btn").addEventListener("click", () => navigate("settings"));
 
@@ -822,6 +994,8 @@ async function enterContractSetScreen(id) {
   editingRounds = set.contracts.slice();
   editingContractSetCount = await db.contractSets.count();
   contractSetNameInput.value = set.name;
+  purchasesPerPlayerInput.value = String(purchaseLimitOf(set));
+  penaltyPerPurchaseInput.value = String(penaltyOf(set));
   renderContractRounds();
 }
 
@@ -887,7 +1061,7 @@ addContractRoundBtn.addEventListener("click", () => {
 });
 
 saveContractSetBtn.addEventListener("click", async () => {
-  const name = contractSetNameInput.value.trim() || "Untitled Set";
+  const name = contractSetNameInput.value.trim() || "Untitled Mode";
   const contracts = editingRounds.map((r) => r.trim()).filter((r) => r.length > 0);
 
   if (contracts.length === 0) {
@@ -895,7 +1069,15 @@ saveContractSetBtn.addEventListener("click", async () => {
     return;
   }
 
-  await db.contractSets.update(editingContractSetId, { name, contracts });
+  const purchasesPerPlayer = parseNonNegativeInt(purchasesPerPlayerInput.value, DEFAULT_PURCHASES_PER_PLAYER);
+  const penaltyPerPurchase = parseNonNegativeInt(penaltyPerPurchaseInput.value, DEFAULT_PENALTY_PER_PURCHASE);
+
+  await db.contractSets.update(editingContractSetId, {
+    name,
+    contracts,
+    purchasesPerPlayer,
+    penaltyPerPurchase,
+  });
   navigate("settings");
 });
 
@@ -903,10 +1085,10 @@ deleteContractSetBtn.addEventListener("click", () => {
   // alert()/confirm() must be the first thing this handler does — see the
   // note in handleUndoLastRound about async gaps breaking the dialog on iOS.
   if (editingContractSetCount <= 1) {
-    alert("You need at least one contract set.");
+    alert("You need at least one mode.");
     return;
   }
-  if (!confirm("Delete this contract set? Games using it will fall back to another set.")) return;
+  if (!confirm("Delete this mode? Games using it will fall back to another mode.")) return;
 
   db.contractSets.delete(editingContractSetId).then(() => navigate("settings"));
 });
