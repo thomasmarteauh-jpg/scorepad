@@ -1,7 +1,7 @@
 // Bump this string any time index.html, style.css, app.js, or the icons
 // change, then reload the app twice (once to fetch the new sw.js, once for
 // it to take over) to pick up the new files.
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v6";
 const CACHE_NAME = `scorepad-cache-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -38,22 +38,31 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first: serve from cache when we have it (works offline), otherwise
-// fetch from the network and store a copy for next time.
+// Network-first, falling back to the cache when offline.
+//
+// This used to be cache-first, which meant an installed app could keep serving
+// an old version indefinitely: nothing ever re-checked the network, so updates
+// only landed if the browser happened to notice a new service worker. Trying
+// the network first keeps the app current while still working fully offline.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(event.request).then((response) => {
-        if (response.ok) {
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.ok) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         }
         return response;
-      });
-    })
+      })
+      .catch(() =>
+        caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          // Offline on a fresh navigation: hand back the app shell.
+          if (event.request.mode === "navigate") return caches.match("./index.html");
+          return Response.error();
+        })
+      )
   );
 });

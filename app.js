@@ -1274,8 +1274,32 @@ deleteContractSetBtn.addEventListener("click", () => {
 // PWA: service worker + iOS "Add to Home Screen" banner
 // ==================================================
 if ("serviceWorker" in navigator) {
+  // Was there already a worker in charge when this page loaded? If so, a later
+  // change of controller means a genuinely new version took over, and the page
+  // should reload onto it. On a first-ever visit there's nothing to reload for.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloadingForUpdate = false;
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Service worker registration failed", err));
+    navigator.serviceWorker
+      // updateViaCache: "none" stops the browser serving sw.js itself from its
+      // HTTP cache, which can otherwise hide a new version for hours.
+      .register("sw.js", { updateViaCache: "none" })
+      .then((registration) => {
+        registration.update();
+        // An installed iOS app is usually *resumed* rather than loaded fresh,
+        // so also check for a new version each time it returns to the front.
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") registration.update();
+        });
+      })
+      .catch((err) => console.warn("Service worker registration failed", err));
   });
 }
 
