@@ -1,7 +1,7 @@
 // Bump this string any time index.html, style.css, app.js, or the icons
-// change, then reload the app twice (once to fetch the new sw.js, once for
-// it to take over) to pick up the new files.
-const CACHE_VERSION = "v7";
+// change. Doing so retires the old cache on activate; fetches are
+// network-first, so a running app picks up new files on its next load.
+const CACHE_VERSION = "v8";
 const CACHE_NAME = `scorepad-cache-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

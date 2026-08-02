@@ -547,7 +547,9 @@ function renderScorecardHeader(players) {
   scorecardHeaderRowEl.innerHTML = "";
   scorecardHeaderRowEl.appendChild(makeCell("th", "Round", "round-col"));
   for (const player of players) {
-    scorecardHeaderRowEl.appendChild(makeCell("th", player.name));
+    const th = makeCell("th", player.name);
+    th.title = player.name; // headers ellipsize, so keep the full name reachable
+    scorecardHeaderRowEl.appendChild(th);
   }
 }
 
@@ -559,12 +561,13 @@ function abbreviateContract(text) {
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
-// e.g. round 1 of the standard set -> "1. 2/3". A game can't run past its
-// mode's last round, so there's no wrapping; any round beyond the list (from
-// older data, or a mode that was shortened later) just shows its number.
+// The contract names the round, so no number is needed: round 1 of the
+// standard set reads "2/3". Contracts that don't fit the "N sets of M" shape
+// show their own text; the number is only a fallback for rounds beyond the
+// mode's list (older data, or a mode shortened after the fact).
 function roundLabel(round) {
-  const abbr = abbreviateContract(currentContracts[round - 1]);
-  return abbr ? `${round}. ${abbr}` : String(round);
+  const contract = currentContracts[round - 1];
+  return abbreviateContract(contract) || contract || String(round);
 }
 
 // True once the game has reached the last round its mode defines.
@@ -607,7 +610,14 @@ function renderScorecardBody(players, scores) {
   scorecardBodyEl.innerHTML = "";
   for (let round = 1; round <= scorecardRoundCount; round++) {
     const tr = document.createElement("tr");
-    tr.appendChild(makeCell("td", roundLabel(round), "round-col"));
+    const labelCell = document.createElement("td");
+    labelCell.className = "round-col";
+    // A table cell won't honour a hard width, so the text sits in an inner
+    // block that clips it — otherwise a long custom contract name would
+    // stretch the frozen column and eat the space this change just freed up.
+    labelCell.appendChild(makeCell("span", roundLabel(round), "round-col-text"));
+    labelCell.title = currentContracts[round - 1] || `Round ${round}`;
+    tr.appendChild(labelCell);
     for (const player of players) {
       const points = scoreByRoundAndPlayer.get(`${round}:${player.id}`);
       const isEmpty = points === undefined;
@@ -626,7 +636,11 @@ function renderScorecardPurchases(players) {
   const limit = purchaseLimitOf(currentMode);
 
   scorecardPurchasesRowEl.innerHTML = "";
-  scorecardPurchasesRowEl.appendChild(makeCell("td", "Purchases", "round-col purchases-label"));
+  const label = document.createElement("td");
+  label.className = "round-col purchases-label";
+  label.appendChild(makeCell("span", "Buys"));
+  label.appendChild(makeCell("span", "used"));
+  scorecardPurchasesRowEl.appendChild(label);
 
   for (const player of players) {
     const count = currentPurchaseCounts.get(player.id) || 0;
@@ -652,9 +666,10 @@ function renderScorecardPurchases(players) {
     upBtn.disabled = count >= limit;
     upBtn.addEventListener("click", () => setPurchaseCount(player.id, count + 1));
 
-    stepper.appendChild(downBtn);
-    stepper.appendChild(value);
+    // Stacked: up on top, count, down below.
     stepper.appendChild(upBtn);
+    stepper.appendChild(value);
+    stepper.appendChild(downBtn);
 
     const td = document.createElement("td");
     td.className = "purchases-cell";

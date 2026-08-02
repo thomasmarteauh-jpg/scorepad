@@ -382,18 +382,44 @@ body {
 
 .scorecard-table th,
 .scorecard-table td {
-  padding: 10px 8px;
+  padding: 10px 6px;
   text-align: center;
-  min-width: 72px;
+  min-width: 56px;
   border-bottom: 1px solid var(--border);
   font-size: 0.95rem;
 }
 
+/* The round column stays pinned to the left while the player columns scroll
+   sideways, so a score is never orphaned from the round it belongs to. */
 .scorecard-table .round-col {
-  min-width: 76px;
-  width: 76px;
+  min-width: 52px;
+  width: 52px;
   font-weight: 600;
   color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+/* Corner cells are pinned on both axes, so they sit above their neighbours. */
+.scorecard-table thead th.round-col,
+.scorecard-table tfoot td.round-col {
+  background: var(--surface);
+  z-index: 3;
+}
+
+/* Enforces the column's width even for long custom contract names. */
+.round-col-text {
+  display: block;
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -403,6 +429,11 @@ body {
   background: var(--surface);
   border-bottom: 2px solid var(--border);
   z-index: 2;
+  /* A long name shouldn't be able to stretch its whole column. */
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scorecard-table tbody td {
@@ -454,26 +485,35 @@ body {
 }
 
 .scorecard-table .purchases-label {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: normal;
 }
 
+/* "Buys" / "used" on their own lines, to keep the column narrow. */
+.scorecard-table .purchases-label span {
+  display: block;
+}
+
+/* Stacked vertically so the column stays narrow — a side-by-side stepper was
+   forcing every player column ~30px wider than the scores needed. */
 .purchase-stepper {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 1px;
 }
 
 .purchase-btn {
-  width: 28px;
-  height: 36px;
+  width: 34px;
+  height: 22px;
   flex-shrink: 0;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg);
   color: var(--text);
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   line-height: 1;
 }
 
@@ -490,6 +530,7 @@ body {
   text-align: center;
   font-size: 0.95rem;
   font-weight: 700;
+  line-height: 1.1;
 }
 
 .scorecard-table tfoot td.leader-total {
