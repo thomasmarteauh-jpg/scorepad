@@ -491,6 +491,10 @@ document.getElementById("start-game-btn").addEventListener("click", async () => 
     isComplete: false,
   });
 
+  // Browsers weigh how much the app is actually used, so ask again now that
+  // there's real data to protect — it's a no-op if already granted.
+  ensurePersistentStorage();
+
   navigate(`scorecard/${gameId}`);
 });
 
@@ -1001,6 +1005,8 @@ const exportDataBtn = document.getElementById("export-data-btn");
 const importDataInput = document.getElementById("import-data-input");
 const dataStatusEl = document.getElementById("data-status");
 const toggleHiddenPlayersBtn = document.getElementById("toggle-hidden-players-btn");
+const storageStatusEl = document.getElementById("storage-status");
+const requestPersistBtn = document.getElementById("request-persist-btn");
 
 document.getElementById("settings-back-btn").addEventListener("click", () => navigate("games"));
 document.getElementById("stats-nav-btn").addEventListener("click", () => navigate("stats"));
@@ -1010,7 +1016,54 @@ async function enterSettingsScreen() {
   dataStatusEl.hidden = true;
   await renderSettingsPlayers();
   await renderSettingsContractSets();
+  await renderStorageStatus();
 }
+
+// ---- Persistent storage ----
+// Games live in the browser's own storage, which the OS may clear when space
+// runs low or the app sits unused for a long time. Asking for persistence
+// marks the data as worth keeping. It's a request, not a guarantee — which is
+// why Settings shows the current state and why Export Data is still the real
+// backup.
+async function ensurePersistentStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return null;
+  try {
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch (err) {
+    return null;
+  }
+}
+
+async function renderStorageStatus() {
+  if (!navigator.storage || !navigator.storage.persisted) {
+    storageStatusEl.textContent =
+      "This browser can't protect saved games from being cleared automatically. Export regularly to keep a copy.";
+    requestPersistBtn.hidden = true;
+    return;
+  }
+
+  let persisted = false;
+  try {
+    persisted = await navigator.storage.persisted();
+  } catch (err) {
+    persisted = false;
+  }
+
+  storageStatusEl.textContent = persisted
+    ? "Saved games are protected from automatic cleanup on this device."
+    : "Saved games could be cleared if this device runs low on storage, or the app goes unused for a long time.";
+  requestPersistBtn.hidden = persisted;
+}
+
+requestPersistBtn.addEventListener("click", async () => {
+  const granted = await ensurePersistentStorage();
+  await renderStorageStatus();
+  if (granted === false) {
+    storageStatusEl.textContent =
+      "This device declined to protect saved games. Export regularly to keep a copy.";
+  }
+});
 
 // Players are never deleted — hiding keeps their past games and stats intact
 // while taking them out of the list and the name suggestions.
@@ -1497,4 +1550,6 @@ function initIOSInstallBanner() {
 initIOSInstallBanner();
 
 // ---- Init ----
+// Fire-and-forget: never let this delay the first screen.
+ensurePersistentStorage();
 ensureDefaultContractSet().then(handleRoute);
