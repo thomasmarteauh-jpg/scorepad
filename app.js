@@ -159,7 +159,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "17";
+const APP_VERSION = "18";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -1257,6 +1257,7 @@ async function saveRoundScores(round, points) {
 // ==================================================
 const summaryTitleEl = document.getElementById("summary-title");
 const summaryBackBtn = document.getElementById("summary-back-btn");
+const summaryHomeBtn = document.getElementById("summary-home-btn");
 const standingsListEl = document.getElementById("standings-list");
 const chartContainerEl = document.getElementById("chart-container");
 const chartLegendEl = document.getElementById("chart-legend");
@@ -1300,6 +1301,7 @@ async function enterSummaryScreen(gameId) {
   shareFallbackEl.hidden = true;
 
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
+  summaryHomeBtn.onclick = () => navigate("games");
   toggleCompleteBtn.onclick = async () => {
     await db.games.update(gameId, { isComplete: !game.isComplete });
     await enterSummaryScreen(gameId);

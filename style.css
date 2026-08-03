@@ -388,6 +388,23 @@ body {
   margin-bottom: 12px;
 }
 
+.header-icon-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.header-icon-btn:active {
+  background: var(--border);
+}
+
 .scorecard-header h2 {
   margin: 0;
   font-size: 1.1rem;
