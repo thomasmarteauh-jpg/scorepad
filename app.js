@@ -45,6 +45,26 @@ db.version(4)
       })
   );
 
+// Buys now belong to the round they were made in, which is what lets the chart
+// place them in time. Rows recorded before this carried only a per-game total,
+// so they're attributed to round 1 — totals stay correct either way.
+db.version(5)
+  .stores({
+    games: "++id, name, createdAt, isComplete",
+    players: "++id, name",
+    scores: "++id, gameId, roundIndex, playerId, [gameId+roundIndex], [gameId+roundIndex+playerId]",
+    contractSets: "++id, name",
+    purchases: "++id, gameId, playerId, roundIndex, [gameId+playerId], [gameId+roundIndex], [gameId+roundIndex+playerId]",
+  })
+  .upgrade((tx) =>
+    tx
+      .table("purchases")
+      .toCollection()
+      .modify((row) => {
+        if (row.roundIndex === undefined) row.roundIndex = 1;
+      })
+  );
+
 const DEFAULT_CONTRACTS = [
   "2 sets of 3",
   "1 set of 4",
@@ -91,7 +111,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "14";
+const APP_VERSION = "15";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -165,14 +185,27 @@ async function getModeForGame(game) {
   return mode || { name: "Standard", contracts: DEFAULT_CONTRACTS };
 }
 
+// playerId -> total buys for the game. There's now one row per round, so these
+// must be added up; the limit still applies across the whole game, and the
+// clamp covers a mode whose limit was lowered after the fact.
+function totalBuysByPlayer(rows, limit) {
+  const totals = new Map();
+  for (const row of rows) {
+    totals.set(row.playerId, (totals.get(row.playerId) || 0) + (row.count || 0));
+  }
+  for (const [playerId, count] of totals) totals.set(playerId, Math.min(count, limit));
+  return totals;
+}
+
+function buysToPoints(buysByPlayer, penalty) {
+  return new Map([...buysByPlayer].map(([playerId, count]) => [playerId, count * penalty]));
+}
+
 // playerId -> penalty points owed for purchases in this game.
 async function getPurchasePointsForGame(game, mode) {
   const resolvedMode = mode || (await getModeForGame(game));
-  const penalty = penaltyOf(resolvedMode);
-  const limit = purchaseLimitOf(resolvedMode);
   const rows = await db.purchases.where("gameId").equals(game.id).toArray();
-  // Clamp in case the mode's limit was lowered after purchases were recorded.
-  return new Map(rows.map((r) => [r.playerId, Math.min(r.count || 0, limit) * penalty]));
+  return buysToPoints(totalBuysByPlayer(rows, purchaseLimitOf(resolvedMode)), penaltyOf(resolvedMode));
 }
 
 // ==================================================
@@ -249,10 +282,9 @@ function describeGame(game, ctx) {
 function winnerNameFor(game, gameScores, mode, ctx) {
   if (gameScores.length === 0) return null;
 
-  const penalty = penaltyOf(mode);
-  const limit = purchaseLimitOf(mode);
-  const purchasePoints = new Map(
-    (ctx.purchasesByGame.get(game.id) || []).map((r) => [r.playerId, Math.min(r.count || 0, limit) * penalty])
+  const purchasePoints = buysToPoints(
+    totalBuysByPlayer(ctx.purchasesByGame.get(game.id) || [], purchaseLimitOf(mode)),
+    penaltyOf(mode)
   );
 
   const gamePlayers = game.playerIds.map((id) => ctx.playerById.get(id)).filter(Boolean);
@@ -590,6 +622,7 @@ let currentMode = null;
 let currentContracts = DEFAULT_CONTRACTS;
 let currentScores = [];
 let currentPurchaseCounts = new Map();
+let currentPurchaseRows = [];
 let scorecardRoundCount = 1;
 
 async function enterScorecardScreen(gameId) {
@@ -659,10 +692,8 @@ function isAtFinalRound() {
 async function refreshScorecardBody() {
   currentScores = await db.scores.where("gameId").equals(currentGameId).toArray();
 
-  const limit = purchaseLimitOf(currentMode);
-  const purchaseRows = await db.purchases.where("gameId").equals(currentGameId).toArray();
-  // Clamp in case the mode's limit was lowered after purchases were recorded.
-  currentPurchaseCounts = new Map(purchaseRows.map((r) => [r.playerId, Math.min(r.count || 0, limit)]));
+  currentPurchaseRows = await db.purchases.where("gameId").equals(currentGameId).toArray();
+  currentPurchaseCounts = totalBuysByPlayer(currentPurchaseRows, purchaseLimitOf(currentMode));
 
   renderScorecardBody(currentPlayers, currentScores);
   renderScorecardPurchases(currentPlayers);
@@ -711,8 +742,8 @@ function renderScorecardBody(players, scores) {
   }
 }
 
-// One stepper per player, counting purchases for the whole game (they don't
-// reset between rounds). Each purchase adds the mode's penalty to the total.
+// Read-only running total per player. Buys are recorded against the round they
+// happened in, from that round's entry sheet, so there's nothing to adjust here.
 function renderScorecardPurchases(players) {
   const limit = purchaseLimitOf(currentMode);
 
@@ -725,52 +756,12 @@ function renderScorecardPurchases(players) {
 
   for (const player of players) {
     const count = currentPurchaseCounts.get(player.id) || 0;
-
-    const stepper = document.createElement("div");
-    stepper.className = "purchase-stepper";
-
-    const downBtn = document.createElement("button");
-    downBtn.type = "button";
-    downBtn.className = "purchase-btn";
-    downBtn.textContent = "▼";
-    downBtn.setAttribute("aria-label", `One fewer purchase for ${player.name}`);
-    downBtn.disabled = count <= 0;
-    downBtn.addEventListener("click", () => setPurchaseCount(player.id, count - 1));
-
-    const value = makeCell("span", String(count), "purchase-value");
-
-    const upBtn = document.createElement("button");
-    upBtn.type = "button";
-    upBtn.className = "purchase-btn";
-    upBtn.textContent = "▲";
-    upBtn.setAttribute("aria-label", `One more purchase for ${player.name}`);
-    upBtn.disabled = count >= limit;
-    upBtn.addEventListener("click", () => setPurchaseCount(player.id, count + 1));
-
-    // Stacked: up on top, count, down below.
-    stepper.appendChild(upBtn);
-    stepper.appendChild(value);
-    stepper.appendChild(downBtn);
-
     const td = document.createElement("td");
     td.className = "purchases-cell";
-    td.appendChild(stepper);
+    td.appendChild(makeCell("span", `${count}/${limit}`, "purchase-total"));
+    td.setAttribute("aria-label", `${player.name} used ${count} of ${limit} buys`);
     scorecardPurchasesRowEl.appendChild(td);
   }
-}
-
-async function setPurchaseCount(playerId, count) {
-  const limit = purchaseLimitOf(currentMode);
-  const clamped = Math.max(0, Math.min(count, limit));
-
-  const existing = await db.purchases.where("[gameId+playerId]").equals([currentGameId, playerId]).first();
-  if (existing) {
-    await db.purchases.update(existing.id, { count: clamped });
-  } else {
-    await db.purchases.add({ gameId: currentGameId, playerId, count: clamped });
-  }
-
-  await refreshScorecardBody();
 }
 
 // The footer has two sticky rows, so the purchases row has to sit exactly one
@@ -852,7 +843,9 @@ function handleUndoLastRound() {
 }
 
 async function deleteRound(lastRound) {
+  // Buys belong to the round, so undoing it releases them back to the player.
   await db.scores.where("[gameId+roundIndex]").equals([currentGameId, lastRound]).delete();
+  await db.purchases.where("[gameId+roundIndex]").equals([currentGameId, lastRound]).delete();
 
   if (lastRound === scorecardRoundCount && scorecardRoundCount > 1) {
     scorecardRoundCount--;
@@ -874,9 +867,15 @@ const sheetCancelBtn = document.getElementById("sheet-cancel-btn");
 const sheetSaveBtn = document.getElementById("sheet-save-btn");
 const sheetKeypadEl = document.getElementById("sheet-keypad");
 const sheetWentOutBtn = document.getElementById("sheet-wentout-btn");
+const sheetBuysLabelEl = document.getElementById("sheet-buys-label");
+const sheetBuysValueEl = document.getElementById("sheet-buys-value");
+const sheetBuyMinusBtn = document.getElementById("sheet-buy-minus");
+const sheetBuyPlusBtn = document.getElementById("sheet-buy-plus");
 
 let sheetRound = null;
 let sheetEntries = [];
+let sheetBuys = [];
+let sheetBuysElsewhere = [];
 let sheetActiveIndex = 0;
 
 async function openRoundSheet(round) {
@@ -893,12 +892,51 @@ async function openRoundSheet(round) {
     const existing = pointsByPlayerId.get(player.id);
     return existing !== undefined ? String(existing) : "";
   });
+
+  // Buys made in this round, plus what each player already spent in other
+  // rounds — the limit is for the whole game, so both are needed to know how
+  // many they have left.
+  const buysThisRound = new Map();
+  const buysOtherRounds = new Map();
+  for (const row of currentPurchaseRows) {
+    const bucket = row.roundIndex === round ? buysThisRound : buysOtherRounds;
+    bucket.set(row.playerId, (bucket.get(row.playerId) || 0) + (row.count || 0));
+  }
+  sheetBuys = currentPlayers.map((p) => buysThisRound.get(p.id) || 0);
+  sheetBuysElsewhere = currentPlayers.map((p) => buysOtherRounds.get(p.id) || 0);
+
   sheetActiveIndex = 0;
   renderSheetPlayers();
 
   sheetOverlayEl.hidden = false;
   scoreSheetEl.hidden = false;
 }
+
+function buysRemainingFor(index) {
+  return purchaseLimitOf(currentMode) - sheetBuysElsewhere[index] - sheetBuys[index];
+}
+
+function renderSheetBuys() {
+  const count = sheetBuys[sheetActiveIndex] || 0;
+  sheetBuysValueEl.textContent = String(count);
+  sheetBuyMinusBtn.disabled = count <= 0;
+  sheetBuyPlusBtn.disabled = buysRemainingFor(sheetActiveIndex) <= 0;
+
+  const spentElsewhere = sheetBuysElsewhere[sheetActiveIndex] || 0;
+  sheetBuysLabelEl.textContent = spentElsewhere
+    ? `Buys this round (${spentElsewhere} used earlier)`
+    : "Buys this round";
+}
+
+function changeActiveBuys(delta) {
+  const next = sheetBuys[sheetActiveIndex] + delta;
+  if (next < 0 || (delta > 0 && buysRemainingFor(sheetActiveIndex) <= 0)) return;
+  sheetBuys[sheetActiveIndex] = next;
+  renderSheetPlayers();
+}
+
+sheetBuyMinusBtn.addEventListener("click", () => changeActiveBuys(-1));
+sheetBuyPlusBtn.addEventListener("click", () => changeActiveBuys(1));
 
 function renderSheetPlayers() {
   sheetPlayersEl.innerHTML = "";
@@ -910,12 +948,22 @@ function renderSheetPlayers() {
     if (index === sheetActiveIndex) row.classList.add("is-active");
 
     const value = sheetEntries[index];
-    row.appendChild(makeCell("span", player.name, "sheet-player-name"));
+    const buys = sheetBuys[index] || 0;
+
+    const nameWrap = document.createElement("span");
+    nameWrap.className = "sheet-player-name";
+    nameWrap.appendChild(makeCell("span", player.name));
+    if (buys > 0) nameWrap.appendChild(makeCell("span", `+${buys} buy${buys === 1 ? "" : "s"}`, "sheet-player-buys"));
+    row.appendChild(nameWrap);
+
     const valueEl = makeCell("span", value === "" ? "–" : value, "sheet-score-value");
     if (value === "") valueEl.classList.add("is-empty");
     row.appendChild(valueEl);
 
-    row.setAttribute("aria-label", `${player.name}, ${value === "" ? "no score yet" : value}`);
+    row.setAttribute(
+      "aria-label",
+      `${player.name}, ${value === "" ? "no score yet" : value}${buys ? `, ${buys} buys this round` : ""}`
+    );
     row.addEventListener("click", () => {
       sheetActiveIndex = index;
       renderSheetPlayers();
@@ -924,6 +972,7 @@ function renderSheetPlayers() {
     sheetPlayersEl.appendChild(row);
   });
 
+  renderSheetBuys();
   keepActiveRowVisible();
 }
 
@@ -999,21 +1048,37 @@ sheetSaveBtn.addEventListener("click", () => {
     if (!confirm("No one scored 0 this round. Usually the player who goes out does. Save anyway?")) return;
   }
 
-  saveRoundScores(round, points);
+  saveRoundScores(round, points, sheetBuys.slice());
 });
 
-async function saveRoundScores(round, points) {
-  await db.transaction("rw", db.scores, async () => {
+async function saveRoundScores(round, points, buys) {
+  await db.transaction("rw", db.scores, db.purchases, async () => {
     for (let i = 0; i < currentPlayers.length; i++) {
       const playerId = currentPlayers[i].id;
-      const existing = await db.scores
+
+      const existingScore = await db.scores
         .where("[gameId+roundIndex+playerId]")
         .equals([currentGameId, round, playerId])
         .first();
-      if (existing) {
-        await db.scores.update(existing.id, { points: points[i] });
+      if (existingScore) {
+        await db.scores.update(existingScore.id, { points: points[i] });
       } else {
         await db.scores.add({ gameId: currentGameId, roundIndex: round, playerId, points: points[i] });
+      }
+
+      const existingBuys = await db.purchases
+        .where("[gameId+roundIndex+playerId]")
+        .equals([currentGameId, round, playerId])
+        .first();
+      if (buys[i] > 0) {
+        if (existingBuys) {
+          await db.purchases.update(existingBuys.id, { count: buys[i] });
+        } else {
+          await db.purchases.add({ gameId: currentGameId, roundIndex: round, playerId, count: buys[i] });
+        }
+      } else if (existingBuys) {
+        // Don't leave zero rows lying around.
+        await db.purchases.delete(existingBuys.id);
       }
     }
   });
@@ -1030,6 +1095,7 @@ const summaryBackBtn = document.getElementById("summary-back-btn");
 const standingsListEl = document.getElementById("standings-list");
 const chartContainerEl = document.getElementById("chart-container");
 const chartLegendEl = document.getElementById("chart-legend");
+const chartRawToggleEl = document.getElementById("chart-raw-toggle");
 const toggleCompleteBtn = document.getElementById("toggle-complete-btn");
 const summaryNewGameBtn = document.getElementById("summary-new-game-btn");
 
@@ -1045,15 +1111,18 @@ async function enterSummaryScreen(gameId) {
   showScreen("summary-screen");
   const players = await Promise.all(game.playerIds.map((id) => db.players.get(id)));
   const scores = await db.scores.where("gameId").equals(gameId).toArray();
-  const purchasePoints = await getPurchasePointsForGame(game);
+  const mode = await getModeForGame(game);
+  const purchaseRows = await db.purchases.where("gameId").equals(gameId).toArray();
+  const purchasePoints = buysToPoints(
+    totalBuysByPlayer(purchaseRows, purchaseLimitOf(mode)),
+    penaltyOf(mode)
+  );
 
   summaryTitleEl.textContent = game.name;
   renderStandings(players, scores, purchasePoints);
-  // Purchases deliberately aren't plotted: a full set of buys can outweigh a
-  // player's entire round score, which squashed the actual round-by-round
-  // play into a sliver of the chart. They're shown as numbers in the
-  // standings breakdown instead, where they read exactly.
-  renderCumulativeChart(players, scores);
+  // Buys now belong to a round, so they show up as part of that round's climb
+  // rather than a jump at the end.
+  prepareCumulativeChart(players, scores, purchaseRows, mode);
   toggleCompleteBtn.textContent = game.isComplete ? "Reopen Game" : "Mark Game Complete";
 
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
@@ -1102,50 +1171,104 @@ function renderStandings(players, scores, purchasePoints) {
   });
 }
 
-// Plots round scores only. See the note at the call site for why purchases
-// are left out.
-function renderCumulativeChart(players, scores) {
-  chartLegendEl.innerHTML = "";
-  const roundCount = scores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+// The chart is redrawn when the raw-score toggle flips, so its inputs are kept.
+let chartData = null;
+let chartShowRaw = false;
 
-  if (roundCount === 0) {
+function prepareCumulativeChart(players, scores, purchaseRows, mode) {
+  const roundCount = scores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+  const penalty = penaltyOf(mode);
+
+  const buysByRoundAndPlayer = new Map();
+  for (const row of purchaseRows) {
+    const key = `${row.roundIndex}:${row.playerId}`;
+    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + (row.count || 0));
+  }
+
+  // Two running totals per player: one counting buy penalties in the round
+  // they were made, one of round scores alone.
+  const series = players.map((player) => {
+    let withBuys = 0;
+    let rawOnly = 0;
+    const total = [];
+    const raw = [];
+    for (let round = 1; round <= roundCount; round++) {
+      const score = scores.find((s) => s.roundIndex === round && s.playerId === player.id);
+      const points = score ? score.points : 0;
+      const buyPoints = (buysByRoundAndPlayer.get(`${round}:${player.id}`) || 0) * penalty;
+      rawOnly += points;
+      withBuys += points + buyPoints;
+      total.push(withBuys);
+      raw.push(rawOnly);
+    }
+    return { total, raw };
+  });
+
+  const hasBuys = series.some((s) => s.total[s.total.length - 1] !== s.raw[s.raw.length - 1]);
+  chartData = { players, series, roundCount, hasBuys };
+
+  chartRawToggleEl.hidden = !hasBuys;
+  drawCumulativeChart();
+}
+
+function drawCumulativeChart() {
+  chartLegendEl.innerHTML = "";
+  if (!chartData || chartData.roundCount === 0) {
     chartContainerEl.innerHTML = '<p class="empty-state">No rounds scored yet</p>';
+    chartRawToggleEl.hidden = true;
     return;
   }
 
-  // cumulativeByPlayer[i] is that player's running total after each round, 1..roundCount.
-  const cumulativeByPlayer = players.map((player) => {
-    let running = 0;
-    const points = [];
-    for (let round = 1; round <= roundCount; round++) {
-      const roundScore = scores.find((s) => s.roundIndex === round && s.playerId === player.id);
-      running += roundScore ? roundScore.points : 0;
-      points.push(running);
-    }
-    return points;
-  });
+  const { players, series, roundCount, hasBuys } = chartData;
+  const showRaw = hasBuys && chartShowRaw;
+  chartRawToggleEl.textContent = showRaw ? "Hide scores without buys" : "Show scores without buys";
 
-  const maxValue = Math.max(1, ...cumulativeByPlayer.flat());
+  const maxValue = Math.max(1, ...series.flatMap((s) => s.total));
   const width = 320;
-  const height = 200;
+  const height = 220;
   const paddingLeft = 34;
+  const paddingRight = 10;
   const paddingTop = 10;
-  const paddingBottom = 20;
-  const plotWidth = width - paddingLeft - 10;
+  const paddingBottom = 30; // room for the round labels
+  const plotWidth = width - paddingLeft - paddingRight;
   const plotHeight = height - paddingTop - paddingBottom;
 
+  // A single round has no span to spread across, so it sits at the left edge.
   const xFor = (round) => paddingLeft + (roundCount === 1 ? 0 : ((round - 1) / (roundCount - 1)) * plotWidth);
   const yFor = (value) => paddingTop + plotHeight - (value / maxValue) * plotHeight;
+  const baseline = yFor(0);
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
-  svg += `<line x1="${paddingLeft}" y1="${yFor(0)}" x2="${width - 10}" y2="${yFor(0)}" style="stroke: var(--border)" stroke-width="1" />`;
-  svg += `<text x="2" y="${yFor(0) + 4}" font-size="10" style="fill: var(--muted)">0</text>`;
+
+  // Axes
+  svg += `<line x1="${paddingLeft}" y1="${baseline}" x2="${width - paddingRight}" y2="${baseline}" style="stroke: var(--border)" stroke-width="1" />`;
+  svg += `<text x="2" y="${baseline + 4}" font-size="10" style="fill: var(--muted)">0</text>`;
   svg += `<text x="2" y="${yFor(maxValue) + 4}" font-size="10" style="fill: var(--muted)">${maxValue}</text>`;
+
+  // Round ticks and labels along the bottom
+  for (let round = 1; round <= roundCount; round++) {
+    const x = xFor(round);
+    svg += `<line x1="${x}" y1="${baseline}" x2="${x}" y2="${baseline + 4}" style="stroke: var(--border)" stroke-width="1" />`;
+    svg += `<text x="${x}" y="${baseline + 16}" font-size="9" text-anchor="middle" style="fill: var(--muted)">${round}</text>`;
+  }
+  svg += `<text x="${paddingLeft + plotWidth / 2}" y="${height - 2}" font-size="9" text-anchor="middle" style="fill: var(--muted)">Round</text>`;
 
   players.forEach((player, i) => {
     const color = CHART_COLORS[i % CHART_COLORS.length];
-    const pointsAttr = cumulativeByPlayer[i].map((value, idx) => `${xFor(idx + 1)},${yFor(value)}`).join(" ");
-    svg += `<polyline points="${pointsAttr}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
+    const { total, raw } = series[i];
+
+    if (showRaw) {
+      const rawPoints = raw.map((value, idx) => `${xFor(idx + 1)},${yFor(value)}`).join(" ");
+      svg += `<polyline points="${rawPoints}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" opacity="0.75" />`;
+    }
+
+    const totalPoints = total.map((value, idx) => `${xFor(idx + 1)},${yFor(value)}`).join(" ");
+    svg += `<polyline points="${totalPoints}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
+
+    // A marker at each round makes overlapping lines easier to separate.
+    total.forEach((value, idx) => {
+      svg += `<circle cx="${xFor(idx + 1)}" cy="${yFor(value)}" r="3" fill="${color}" />`;
+    });
   });
 
   svg += "</svg>";
@@ -1164,6 +1287,11 @@ function renderCumulativeChart(players, scores) {
     chartLegendEl.appendChild(item);
   });
 }
+
+chartRawToggleEl.addEventListener("click", () => {
+  chartShowRaw = !chartShowRaw;
+  drawCumulativeChart();
+});
 
 // ==================================================
 // Screen 5: settings (players, contract sets, data)
@@ -1474,12 +1602,8 @@ async function computePlayerStats() {
     // Counted when explicitly finished, or when it played out its full round list.
     if (!game.isComplete && maxRound < contracts.length) continue;
 
-    const penalty = penaltyOf(mode);
-    const limit = purchaseLimitOf(mode);
-    const buysByPlayerId = new Map(
-      (purchasesByGame.get(game.id) || []).map((r) => [r.playerId, Math.min(r.count || 0, limit)])
-    );
-    const purchasePoints = new Map([...buysByPlayerId].map(([id, count]) => [id, count * penalty]));
+    const buysByPlayerId = totalBuysByPlayer(purchasesByGame.get(game.id) || [], purchaseLimitOf(mode));
+    const purchasePoints = buysToPoints(buysByPlayerId, penaltyOf(mode));
 
     const gamePlayers = game.playerIds.map((id) => playerById.get(id)).filter(Boolean);
     if (gamePlayers.length === 0) continue;
@@ -1592,8 +1716,12 @@ importDataInput.addEventListener("change", async () => {
       throw new Error("This file doesn't look like a ScorePad export.");
     }
 
-    // Backups made before purchases existed simply have none.
-    const purchases = Array.isArray(payload.purchases) ? payload.purchases : [];
+    // Backups made before purchases existed simply have none; those made
+    // before buys carried a round get attributed to round 1, matching the
+    // upgrade applied to data already on this device.
+    const purchases = (Array.isArray(payload.purchases) ? payload.purchases : []).map((row) =>
+      row.roundIndex === undefined ? { ...row, roundIndex: 1 } : row
+    );
 
     await db.transaction("rw", db.games, db.players, db.scores, db.contractSets, db.purchases, async () => {
       await Promise.all([

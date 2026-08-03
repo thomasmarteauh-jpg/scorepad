@@ -524,42 +524,15 @@ body {
   display: block;
 }
 
-/* Stacked vertically so the column stays narrow — a side-by-side stepper was
-   forcing every player column ~30px wider than the scores needed. */
-.purchase-stepper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-}
-
-.purchase-btn {
-  width: 34px;
-  height: 22px;
-  flex-shrink: 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 0.6rem;
-  line-height: 1;
-}
-
-.purchase-btn:active:not(:disabled) {
-  background: var(--border);
-}
-
-.purchase-btn:disabled {
-  opacity: 0.3;
-}
-
-.purchase-value {
-  min-width: 20px;
-  text-align: center;
+.purchase-total {
   font-size: 0.95rem;
   font-weight: 700;
-  line-height: 1.1;
+}
+
+.sheet-player-buys {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: 8px;
 }
 
 .scorecard-table tfoot td.leader-total {
@@ -712,6 +685,54 @@ body {
   background: var(--border);
 }
 
+.sheet-buys {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 4px 4px 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sheet-buys-label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.sheet-buys-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sheet-buy-btn {
+  width: 42px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.sheet-buy-btn:active:not(:disabled) {
+  background: var(--border);
+}
+
+.sheet-buy-btn:disabled {
+  opacity: 0.3;
+}
+
+.sheet-buys-value {
+  min-width: 24px;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
 .sheet-keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -812,6 +833,15 @@ body {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.chart-raw-toggle {
+  display: block;
+  margin: 8px auto 0;
+}
+
+.chart-raw-toggle[hidden] {
+  display: none;
 }
 
 .chart-legend {

@@ -115,6 +115,7 @@
       <ol id="standings-list" class="standings-list"></ol>
 
       <div id="chart-container" class="chart-container"></div>
+      <button type="button" id="chart-raw-toggle" class="link-btn chart-raw-toggle" hidden></button>
       <div id="chart-legend" class="chart-legend"></div>
 
       <button type="button" id="toggle-complete-btn" class="btn-secondary full-width-btn"></button>
@@ -235,6 +236,15 @@
     <!-- Built-in pad: iOS's numeric keyboard has no "next" key and covers the
          lower rows, so entry stays inside the sheet instead. -->
     <button type="button" id="sheet-wentout-btn" class="keypad-wide">Went out — 0</button>
+
+    <div class="sheet-buys">
+      <span id="sheet-buys-label" class="sheet-buys-label">Buys this round</span>
+      <div class="sheet-buys-stepper">
+        <button type="button" id="sheet-buy-minus" class="sheet-buy-btn" aria-label="One fewer buy">−</button>
+        <span id="sheet-buys-value" class="sheet-buys-value">0</span>
+        <button type="button" id="sheet-buy-plus" class="sheet-buy-btn" aria-label="One more buy">+</button>
+      </div>
+    </div>
     <div id="sheet-keypad" class="sheet-keypad">
       <button type="button" class="keypad-btn" data-key="1">1</button>
       <button type="button" class="keypad-btn" data-key="2">2</button>
