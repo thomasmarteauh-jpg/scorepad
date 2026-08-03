@@ -91,7 +91,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "13";
+const APP_VERSION = "14";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -792,14 +792,33 @@ function renderScorecardTotals(players, scores) {
       (currentPurchaseCounts.get(player.id) || 0) * penalty
   );
   const lowestTotal = totals.length ? Math.min(...totals) : 0;
+  const highestTotal = totals.length ? Math.max(...totals) : 0;
+  // Before anyone pulls ahead every player is joint first, which says nothing.
+  const ranksMeaningful = lowestTotal !== highestTotal;
 
   scorecardTotalsRowEl.innerHTML = "";
   scorecardTotalsRowEl.appendChild(makeCell("td", "Total", "round-col"));
   totals.forEach((total) => {
-    const td = makeCell("td", String(total));
+    const td = document.createElement("td");
+    td.appendChild(makeCell("span", String(total), "total-value"));
+
+    if (ranksMeaningful) {
+      // Competition ranking: a tie shares the place and consumes the next, so
+      // two players on the lowest total are both 1st and the next is 3rd.
+      const rank = 1 + totals.filter((other) => other < total).length;
+      td.appendChild(makeCell("span", ordinal(rank), "rank-badge"));
+    }
+
     if (total === lowestTotal) td.classList.add("leader-total");
     scorecardTotalsRowEl.appendChild(td);
   });
+}
+
+function ordinal(n) {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  const suffix = { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
+  return `${n}${suffix}`;
 }
 
 // Tapping any cell in a round opens the sheet for that whole round, since

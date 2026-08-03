@@ -566,6 +566,22 @@ body {
   color: var(--accent);
 }
 
+.total-value {
+  display: block;
+}
+
+.rank-badge {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.scorecard-table tfoot td.leader-total .rank-badge {
+  color: var(--accent);
+}
+
 .scorecard-actions {
   display: flex;
   gap: 12px;
