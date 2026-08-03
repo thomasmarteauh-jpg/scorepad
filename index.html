@@ -32,6 +32,14 @@
         <h2>Games</h2>
         <button type="button" id="settings-nav-btn" class="btn-secondary">Settings</button>
       </div>
+      <div id="backup-nudge" class="backup-nudge" hidden>
+        <p id="backup-nudge-text"></p>
+        <div class="backup-nudge-actions">
+          <button type="button" id="backup-nudge-export-btn" class="btn-primary">Export backup</button>
+          <button type="button" id="backup-nudge-dismiss-btn" class="link-btn">Later</button>
+        </div>
+      </div>
+
       <div id="games-list" class="games-list">
         <!-- Game entries or empty state get rendered here by app.js -->
       </div>
@@ -139,6 +147,7 @@
       </button>
 
       <p class="settings-hint">Back up all games, players, and modes to a file, or restore from one.</p>
+      <p id="backup-status" class="settings-hint"></p>
       <div class="data-actions">
         <button type="button" id="export-data-btn" class="btn-secondary">Export Data</button>
         <label for="import-data-input" class="btn-secondary file-label">Import Data</label>

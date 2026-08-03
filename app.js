@@ -91,7 +91,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "12";
+const APP_VERSION = "13";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -183,6 +183,7 @@ const gamesListEl = document.getElementById("games-list");
 async function enterGamesScreen() {
   showScreen("games-screen");
   await renderGamesList();
+  await renderBackupNudge();
 }
 
 async function renderGamesList() {
@@ -1159,6 +1160,11 @@ const storageStatusEl = document.getElementById("storage-status");
 const requestPersistBtn = document.getElementById("request-persist-btn");
 const versionInfoEl = document.getElementById("version-info");
 const versionNoteEl = document.getElementById("version-note");
+const backupStatusEl = document.getElementById("backup-status");
+const backupNudgeEl = document.getElementById("backup-nudge");
+const backupNudgeTextEl = document.getElementById("backup-nudge-text");
+const backupNudgeExportBtn = document.getElementById("backup-nudge-export-btn");
+const backupNudgeDismissBtn = document.getElementById("backup-nudge-dismiss-btn");
 
 document.getElementById("settings-back-btn").addEventListener("click", () => navigate("games"));
 document.getElementById("stats-nav-btn").addEventListener("click", () => navigate("stats"));
@@ -1169,6 +1175,7 @@ async function enterSettingsScreen() {
   await renderSettingsPlayers();
   await renderSettingsContractSets();
   await renderStorageStatus();
+  renderBackupStatus();
   await renderVersionInfo();
 }
 
@@ -1248,6 +1255,63 @@ requestPersistBtn.addEventListener("click", async () => {
       "This device declined to protect saved games. Export regularly to keep a copy.";
   }
 });
+
+// ---- Backup reminders ----
+// Kept in localStorage rather than the database: this records what *this
+// device* has backed up, so it shouldn't travel inside an export. If the data
+// is ever wiped, the counter goes with it, which is the right behaviour.
+const BACKUP_BASELINE_KEY = "scorepad-backup-baseline";
+const BACKUP_LAST_AT_KEY = "scorepad-backup-last-at";
+const BACKUP_REMIND_AFTER = 5;
+
+function readBackupBaseline() {
+  const raw = Number(localStorage.getItem(BACKUP_BASELINE_KEY));
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+}
+
+// Called on export, and on "Later" — dismissing simply defers the next nudge
+// by another BACKUP_REMIND_AFTER games.
+function markBackedUp(gameCount, exported = true) {
+  localStorage.setItem(BACKUP_BASELINE_KEY, String(gameCount));
+  if (exported) localStorage.setItem(BACKUP_LAST_AT_KEY, new Date().toISOString());
+}
+
+async function renderBackupNudge() {
+  const gameCount = await db.games.count();
+  const unbacked = gameCount - readBackupBaseline();
+
+  if (unbacked < BACKUP_REMIND_AFTER) {
+    backupNudgeEl.hidden = true;
+    return;
+  }
+
+  const everExported = !!localStorage.getItem(BACKUP_LAST_AT_KEY);
+  backupNudgeTextEl.textContent = everExported
+    ? `${unbacked} games since your last backup. They exist only on this device.`
+    : `${gameCount} games saved and never backed up. They exist only on this device.`;
+  backupNudgeEl.hidden = false;
+}
+
+backupNudgeExportBtn.addEventListener("click", async () => {
+  await exportAllData();
+  await renderBackupNudge();
+});
+
+backupNudgeDismissBtn.addEventListener("click", async () => {
+  markBackedUp(await db.games.count(), false);
+  await renderBackupNudge();
+});
+
+function renderBackupStatus() {
+  const lastAt = localStorage.getItem(BACKUP_LAST_AT_KEY);
+  backupStatusEl.textContent = lastAt
+    ? `Last backup: ${new Date(lastAt).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })}`
+    : "Last backup: never";
+}
 
 // Players are never deleted — hiding keeps their past games and stats intact
 // while taking them out of the list and the name suggestions.
@@ -1451,7 +1515,7 @@ function renderPlayerStats(stats) {
   }
 }
 
-exportDataBtn.addEventListener("click", async () => {
+async function exportAllData() {
   const [games, players, scores, contractSets, purchases] = await Promise.all([
     db.games.toArray(),
     db.players.toArray(),
@@ -1479,6 +1543,13 @@ exportDataBtn.addEventListener("click", async () => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+
+  markBackedUp(games.length);
+}
+
+exportDataBtn.addEventListener("click", async () => {
+  await exportAllData();
+  renderBackupStatus();
 });
 
 importDataInput.addEventListener("change", async () => {
@@ -1523,10 +1594,15 @@ importDataInput.addEventListener("change", async () => {
     });
     await ensureDefaultContractSet();
 
+    // Restoring proves a backup file exists, so don't nag about the games it
+    // just brought in.
+    markBackedUp(payload.games.length);
+
     dataStatusEl.textContent = "Import complete.";
     dataStatusEl.hidden = false;
     await renderSettingsPlayers();
     await renderSettingsContractSets();
+    renderBackupStatus();
   } catch (err) {
     dataStatusEl.textContent = `Import failed: ${err.message}`;
     dataStatusEl.hidden = false;

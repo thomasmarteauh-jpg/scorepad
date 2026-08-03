@@ -128,6 +128,35 @@ body {
   gap: 12px;
 }
 
+.backup-nudge {
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.backup-nudge[hidden] {
+  display: none;
+}
+
+.backup-nudge p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.backup-nudge-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.backup-nudge-actions .btn-primary {
+  flex: 1;
+}
+
 .game-status {
   display: block;
   margin-top: 4px;
