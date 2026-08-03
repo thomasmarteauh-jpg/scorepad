@@ -397,6 +397,153 @@ body {
   white-space: nowrap;
 }
 
+/* ---- Buys strip (live, during the round) ---- */
+.buys-strip {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.buys-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.buys-strip-title {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.buys-strip-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 0.9rem;
+}
+
+.buys-strip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.buys-strip-list:empty {
+  display: none;
+}
+
+.buy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.buy-chip:active {
+  background: var(--border);
+}
+
+.buy-chip-card {
+  font-weight: 700;
+}
+
+.buy-chip-card.is-red {
+  color: #e6194b;
+}
+
+.buy-chip-remove {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* ---- Buy dialog ---- */
+.buy-players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.buy-player-btn {
+  flex: 1 1 calc(50% - 4px);
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.buy-player-btn:disabled {
+  opacity: 0.35;
+}
+
+.buy-player-btn.is-active {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.buy-card-picker[hidden] {
+  display: none;
+}
+
+.buy-suits {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.buy-suit-btn {
+  min-height: 52px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.buy-suit-btn.is-red {
+  color: #e6194b;
+}
+
+.buy-suit-btn.is-active {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.buy-ranks {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.buy-rank-btn {
+  min-height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.buy-rank-btn:disabled {
+  opacity: 0.35;
+}
+
 .scorecard-scroll {
   overflow: auto;
   max-height: 60vh;
@@ -683,54 +830,6 @@ body {
 
 .keypad-wide:active {
   background: var(--border);
-}
-
-.sheet-buys {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  padding: 4px 4px 4px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.sheet-buys-label {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.sheet-buys-stepper {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sheet-buy-btn {
-  width: 42px;
-  min-height: 40px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 1.2rem;
-  line-height: 1;
-}
-
-.sheet-buy-btn:active:not(:disabled) {
-  background: var(--border);
-}
-
-.sheet-buy-btn:disabled {
-  opacity: 0.3;
-}
-
-.sheet-buys-value {
-  min-width: 24px;
-  text-align: center;
-  font-size: 1.05rem;
-  font-weight: 700;
 }
 
 .sheet-keypad {

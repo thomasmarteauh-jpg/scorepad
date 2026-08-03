@@ -65,6 +65,54 @@ db.version(5)
       })
   );
 
+// One row per buy, each carrying the card that was taken (both fields null if
+// the card wasn't recorded). Rows previously held a count, so they're expanded
+// into that many cardless buys — the totals they produce are unchanged.
+db.version(6)
+  .stores({
+    games: "++id, name, createdAt, isComplete",
+    players: "++id, name",
+    scores: "++id, gameId, roundIndex, playerId, [gameId+roundIndex], [gameId+roundIndex+playerId]",
+    contractSets: "++id, name",
+    purchases: "++id, gameId, playerId, roundIndex, [gameId+playerId], [gameId+roundIndex], [gameId+roundIndex+playerId]",
+  })
+  .upgrade(async (tx) => {
+    const table = tx.table("purchases");
+    const rows = await table.toArray();
+    const expanded = [];
+    for (const row of rows) {
+      const count = row.count === undefined ? 1 : row.count;
+      for (let i = 0; i < count; i++) {
+        expanded.push({
+          gameId: row.gameId,
+          roundIndex: row.roundIndex === undefined ? 1 : row.roundIndex,
+          playerId: row.playerId,
+          rank: null,
+          suit: null,
+        });
+      }
+    }
+    await table.clear();
+    if (expanded.length) await table.bulkAdd(expanded);
+  });
+
+const CARD_RANKS = ["3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const CARD_SUITS = [
+  { code: "S", symbol: "♠", red: false },
+  { code: "H", symbol: "♥", red: true },
+  { code: "D", symbol: "♦", red: true },
+  { code: "C", symbol: "♣", red: false },
+];
+
+function suitInfo(code) {
+  return CARD_SUITS.find((s) => s.code === code) || null;
+}
+
+function cardLabel(row) {
+  const suit = suitInfo(row.suit);
+  return row.rank && suit ? `${row.rank}${suit.symbol}` : "?";
+}
+
 const DEFAULT_CONTRACTS = [
   "2 sets of 3",
   "1 set of 4",
@@ -111,7 +159,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "16";
+const APP_VERSION = "17";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -185,13 +233,13 @@ async function getModeForGame(game) {
   return mode || { name: "Standard", contracts: DEFAULT_CONTRACTS };
 }
 
-// playerId -> total buys for the game. There's now one row per round, so these
-// must be added up; the limit still applies across the whole game, and the
-// clamp covers a mode whose limit was lowered after the fact.
+// playerId -> total buys for the game. Each row is a single buy, so this is a
+// count of rows; the limit still applies across the whole game, and the clamp
+// covers a mode whose limit was lowered after the fact.
 function totalBuysByPlayer(rows, limit) {
   const totals = new Map();
   for (const row of rows) {
-    totals.set(row.playerId, (totals.get(row.playerId) || 0) + (row.count || 0));
+    totals.set(row.playerId, (totals.get(row.playerId) || 0) + 1);
   }
   for (const [playerId, count] of totals) totals.set(playerId, Math.min(count, limit));
   return totals;
@@ -615,6 +663,9 @@ const addRoundBtn = document.getElementById("add-round-btn");
 const undoRoundBtn = document.getElementById("undo-round-btn");
 const backToGamesBtn = document.getElementById("back-to-games-btn");
 const viewSummaryBtn = document.getElementById("view-summary-btn");
+const buysStripTitleEl = document.getElementById("buys-strip-title");
+const buysStripListEl = document.getElementById("buys-strip-list");
+const logBuyBtn = document.getElementById("log-buy-btn");
 
 let currentGameId = null;
 let currentPlayers = [];
@@ -697,6 +748,7 @@ async function refreshScorecardBody() {
 
   renderScorecardBody(currentPlayers, currentScores);
   renderScorecardPurchases(currentPlayers);
+  renderBuysStrip();
   renderScorecardTotals(currentPlayers, currentScores);
   syncPurchasesRowOffset();
   updateScorecardActions();
@@ -761,6 +813,57 @@ function renderScorecardPurchases(players) {
     td.appendChild(makeCell("span", `${count}/${limit}`, "purchase-total"));
     td.setAttribute("aria-label", `${player.name} used ${count} of ${limit} buys`);
     scorecardPurchasesRowEl.appendChild(td);
+  }
+}
+
+// ---- Live buys for the round in play ----
+// The round being played is the first unscored one, so buys logged mid-hand
+// land on the right round without anyone having to say which.
+function currentPlayRound() {
+  const maxScored = currentScores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+  return Math.max(1, Math.min(maxScored + 1, currentContracts.length));
+}
+
+function buysRemainingForPlayer(playerId) {
+  const used = currentPurchaseRows.filter((row) => row.playerId === playerId).length;
+  return purchaseLimitOf(currentMode) - used;
+}
+
+function renderBuysStrip() {
+  const round = currentPlayRound();
+  buysStripTitleEl.textContent = `Round ${round} buys`;
+
+  const rows = currentPurchaseRows.filter((row) => row.roundIndex === round);
+  buysStripListEl.innerHTML = "";
+
+  if (rows.length === 0) {
+    buysStripListEl.appendChild(makeCell("span", "None yet", "buys-strip-title"));
+    return;
+  }
+
+  for (const row of rows) {
+    const player = currentPlayers.find((p) => p.id === row.playerId);
+    if (!player) continue;
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "buy-chip";
+    chip.appendChild(makeCell("span", player.name));
+
+    const suit = suitInfo(row.suit);
+    const cardEl = makeCell("span", cardLabel(row), "buy-chip-card");
+    if (suit && suit.red) cardEl.classList.add("is-red");
+    chip.appendChild(cardEl);
+    chip.appendChild(makeCell("span", "×", "buy-chip-remove"));
+
+    chip.setAttribute("aria-label", `Remove ${player.name}'s buy, ${cardLabel(row)}`);
+    chip.addEventListener("click", () => {
+      // confirm() first, synchronously — see the note in handleUndoLastRound.
+      if (!confirm(`Remove ${player.name}'s buy (${cardLabel(row)})?`)) return;
+      db.purchases.delete(row.id).then(refreshScorecardBody);
+    });
+
+    buysStripListEl.appendChild(chip);
   }
 }
 
@@ -855,6 +958,115 @@ async function deleteRound(lastRound) {
 }
 
 // ==================================================
+// Buy logging (player, then card)
+// ==================================================
+const buyOverlayEl = document.getElementById("buy-overlay");
+const buySheetEl = document.getElementById("buy-sheet");
+const buySheetTitleEl = document.getElementById("buy-sheet-title");
+const buySheetStepEl = document.getElementById("buy-sheet-step");
+const buyPlayersEl = document.getElementById("buy-players");
+const buyCardPickerEl = document.getElementById("buy-card-picker");
+const buySuitsEl = document.getElementById("buy-suits");
+const buyRanksEl = document.getElementById("buy-ranks");
+const buyCloseBtn = document.getElementById("buy-close-btn");
+const buyCancelBtn = document.getElementById("buy-cancel-btn");
+const buySkipBtn = document.getElementById("buy-skip-btn");
+
+let buyRound = 1;
+let buyPlayerId = null;
+let buySuit = null;
+
+function openBuyDialog() {
+  buyRound = currentPlayRound();
+  buyPlayerId = null;
+  buySuit = null;
+  buySheetTitleEl.textContent = `Add a buy — round ${buyRound}`;
+  renderBuyDialog();
+  buyOverlayEl.hidden = false;
+  buySheetEl.hidden = false;
+}
+
+function closeBuyDialog() {
+  buyOverlayEl.hidden = true;
+  buySheetEl.hidden = true;
+}
+
+function renderBuyDialog() {
+  buySheetStepEl.textContent = buyPlayerId === null ? "Who bought?" : "Which card?";
+  buyCardPickerEl.hidden = buyPlayerId === null;
+  buySkipBtn.hidden = buyPlayerId === null;
+
+  buyPlayersEl.innerHTML = "";
+  for (const player of currentPlayers) {
+    const remaining = buysRemainingForPlayer(player.id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "buy-player-btn";
+    if (player.id === buyPlayerId) btn.classList.add("is-active");
+    btn.textContent = remaining > 0 ? player.name : `${player.name} (none left)`;
+    btn.disabled = remaining <= 0;
+    btn.addEventListener("click", () => {
+      buyPlayerId = player.id;
+      renderBuyDialog();
+    });
+    buyPlayersEl.appendChild(btn);
+  }
+
+  buySuitsEl.innerHTML = "";
+  for (const suit of CARD_SUITS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "buy-suit-btn";
+    if (suit.red) btn.classList.add("is-red");
+    if (suit.code === buySuit) btn.classList.add("is-active");
+    btn.textContent = suit.symbol;
+    btn.setAttribute("aria-label", suit.code);
+    btn.addEventListener("click", () => {
+      buySuit = suit.code;
+      renderBuyDialog();
+    });
+    buySuitsEl.appendChild(btn);
+  }
+
+  // Ranks stay out of reach until a suit is chosen, since picking one commits
+  // the buy — three taps total: player, suit, rank.
+  buyRanksEl.innerHTML = "";
+  for (const rank of CARD_RANKS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "buy-rank-btn";
+    btn.textContent = rank;
+    btn.disabled = buySuit === null;
+    btn.addEventListener("click", () => saveBuy(rank, buySuit));
+    buyRanksEl.appendChild(btn);
+  }
+}
+
+async function saveBuy(rank, suit) {
+  if (buyPlayerId === null) return;
+
+  await db.purchases.add({
+    gameId: currentGameId,
+    roundIndex: buyRound,
+    playerId: buyPlayerId,
+    rank: rank || null,
+    suit: suit || null,
+  });
+
+  // Make sure the round being played is actually on the card.
+  scorecardRoundCount = Math.max(scorecardRoundCount, buyRound);
+
+  closeBuyDialog();
+  await refreshScorecardBody();
+}
+
+logBuyBtn.addEventListener("click", openBuyDialog);
+buyCloseBtn.addEventListener("click", closeBuyDialog);
+buyCancelBtn.addEventListener("click", closeBuyDialog);
+buyOverlayEl.addEventListener("click", closeBuyDialog);
+buySkipBtn.addEventListener("click", () => saveBuy(null, null));
+
+// ==================================================
 // Round score entry sheet
 // ==================================================
 const sheetOverlayEl = document.getElementById("sheet-overlay");
@@ -867,15 +1079,10 @@ const sheetCancelBtn = document.getElementById("sheet-cancel-btn");
 const sheetSaveBtn = document.getElementById("sheet-save-btn");
 const sheetKeypadEl = document.getElementById("sheet-keypad");
 const sheetWentOutBtn = document.getElementById("sheet-wentout-btn");
-const sheetBuysLabelEl = document.getElementById("sheet-buys-label");
-const sheetBuysValueEl = document.getElementById("sheet-buys-value");
-const sheetBuyMinusBtn = document.getElementById("sheet-buy-minus");
-const sheetBuyPlusBtn = document.getElementById("sheet-buy-plus");
 
 let sheetRound = null;
 let sheetEntries = [];
-let sheetBuys = [];
-let sheetBuysElsewhere = [];
+let sheetBuyRows = [];
 let sheetActiveIndex = 0;
 
 async function openRoundSheet(round) {
@@ -893,17 +1100,11 @@ async function openRoundSheet(round) {
     return existing !== undefined ? String(existing) : "";
   });
 
-  // Buys made in this round, plus what each player already spent in other
-  // rounds — the limit is for the whole game, so both are needed to know how
-  // many they have left.
-  const buysThisRound = new Map();
-  const buysOtherRounds = new Map();
-  for (const row of currentPurchaseRows) {
-    const bucket = row.roundIndex === round ? buysThisRound : buysOtherRounds;
-    bucket.set(row.playerId, (bucket.get(row.playerId) || 0) + (row.count || 0));
-  }
-  sheetBuys = currentPlayers.map((p) => buysThisRound.get(p.id) || 0);
-  sheetBuysElsewhere = currentPlayers.map((p) => buysOtherRounds.get(p.id) || 0);
+  // Buys are logged live from the scorecard, so here they're only shown —
+  // each player's cards for this round, alongside their score.
+  sheetBuyRows = currentPlayers.map((player) =>
+    currentPurchaseRows.filter((row) => row.roundIndex === round && row.playerId === player.id)
+  );
 
   sheetActiveIndex = 0;
   renderSheetPlayers();
@@ -911,32 +1112,6 @@ async function openRoundSheet(round) {
   sheetOverlayEl.hidden = false;
   scoreSheetEl.hidden = false;
 }
-
-function buysRemainingFor(index) {
-  return purchaseLimitOf(currentMode) - sheetBuysElsewhere[index] - sheetBuys[index];
-}
-
-function renderSheetBuys() {
-  const count = sheetBuys[sheetActiveIndex] || 0;
-  sheetBuysValueEl.textContent = String(count);
-  sheetBuyMinusBtn.disabled = count <= 0;
-  sheetBuyPlusBtn.disabled = buysRemainingFor(sheetActiveIndex) <= 0;
-
-  const spentElsewhere = sheetBuysElsewhere[sheetActiveIndex] || 0;
-  sheetBuysLabelEl.textContent = spentElsewhere
-    ? `Buys this round (${spentElsewhere} used earlier)`
-    : "Buys this round";
-}
-
-function changeActiveBuys(delta) {
-  const next = sheetBuys[sheetActiveIndex] + delta;
-  if (next < 0 || (delta > 0 && buysRemainingFor(sheetActiveIndex) <= 0)) return;
-  sheetBuys[sheetActiveIndex] = next;
-  renderSheetPlayers();
-}
-
-sheetBuyMinusBtn.addEventListener("click", () => changeActiveBuys(-1));
-sheetBuyPlusBtn.addEventListener("click", () => changeActiveBuys(1));
 
 function renderSheetPlayers() {
   sheetPlayersEl.innerHTML = "";
@@ -948,12 +1123,15 @@ function renderSheetPlayers() {
     if (index === sheetActiveIndex) row.classList.add("is-active");
 
     const value = sheetEntries[index];
-    const buys = sheetBuys[index] || 0;
+    const buyRows = sheetBuyRows[index] || [];
 
     const nameWrap = document.createElement("span");
     nameWrap.className = "sheet-player-name";
     nameWrap.appendChild(makeCell("span", player.name));
-    if (buys > 0) nameWrap.appendChild(makeCell("span", `+${buys} buy${buys === 1 ? "" : "s"}`, "sheet-player-buys"));
+    if (buyRows.length) {
+      const cards = buyRows.map((r) => cardLabel(r)).join(" ");
+      nameWrap.appendChild(makeCell("span", cards, "sheet-player-buys"));
+    }
     row.appendChild(nameWrap);
 
     const valueEl = makeCell("span", value === "" ? "–" : value, "sheet-score-value");
@@ -962,7 +1140,9 @@ function renderSheetPlayers() {
 
     row.setAttribute(
       "aria-label",
-      `${player.name}, ${value === "" ? "no score yet" : value}${buys ? `, ${buys} buys this round` : ""}`
+      `${player.name}, ${value === "" ? "no score yet" : value}${
+        buyRows.length ? `, ${buyRows.length} buys this round` : ""
+      }`
     );
     row.addEventListener("click", () => {
       sheetActiveIndex = index;
@@ -972,7 +1152,6 @@ function renderSheetPlayers() {
     sheetPlayersEl.appendChild(row);
   });
 
-  renderSheetBuys();
   keepActiveRowVisible();
 }
 
@@ -1048,14 +1227,15 @@ sheetSaveBtn.addEventListener("click", () => {
     if (!confirm("No one scored 0 this round. Usually the player who goes out does. Save anyway?")) return;
   }
 
-  saveRoundScores(round, points, sheetBuys.slice());
+  saveRoundScores(round, points);
 });
 
-async function saveRoundScores(round, points, buys) {
-  await db.transaction("rw", db.scores, db.purchases, async () => {
+// Buys aren't touched here — they're logged live from the scorecard as they
+// happen, so scoring only writes the round's points.
+async function saveRoundScores(round, points) {
+  await db.transaction("rw", db.scores, async () => {
     for (let i = 0; i < currentPlayers.length; i++) {
       const playerId = currentPlayers[i].id;
-
       const existingScore = await db.scores
         .where("[gameId+roundIndex+playerId]")
         .equals([currentGameId, round, playerId])
@@ -1064,21 +1244,6 @@ async function saveRoundScores(round, points, buys) {
         await db.scores.update(existingScore.id, { points: points[i] });
       } else {
         await db.scores.add({ gameId: currentGameId, roundIndex: round, playerId, points: points[i] });
-      }
-
-      const existingBuys = await db.purchases
-        .where("[gameId+roundIndex+playerId]")
-        .equals([currentGameId, round, playerId])
-        .first();
-      if (buys[i] > 0) {
-        if (existingBuys) {
-          await db.purchases.update(existingBuys.id, { count: buys[i] });
-        } else {
-          await db.purchases.add({ gameId: currentGameId, roundIndex: round, playerId, count: buys[i] });
-        }
-      } else if (existingBuys) {
-        // Don't leave zero rows lying around.
-        await db.purchases.delete(existingBuys.id);
       }
     }
   });
@@ -1193,7 +1358,7 @@ function buildSummaryText(data) {
   const buysByRoundAndPlayer = new Map();
   for (const row of purchaseRows) {
     const key = `${row.roundIndex}:${row.playerId}`;
-    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + (row.count || 0));
+    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + 1);
   }
 
   for (let round = 1; round <= roundsPlayed; round++) {
@@ -1315,7 +1480,7 @@ function prepareCumulativeChart(players, scores, purchaseRows, mode) {
   const buysByRoundAndPlayer = new Map();
   for (const row of purchaseRows) {
     const key = `${row.roundIndex}:${row.playerId}`;
-    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + (row.count || 0));
+    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + 1);
   }
 
   // Two running totals per player: one counting buy penalties in the round
@@ -1849,12 +2014,26 @@ importDataInput.addEventListener("change", async () => {
       throw new Error("This file doesn't look like a ScorePad export.");
     }
 
-    // Backups made before purchases existed simply have none; those made
-    // before buys carried a round get attributed to round 1, matching the
-    // upgrade applied to data already on this device.
-    const purchases = (Array.isArray(payload.purchases) ? payload.purchases : []).map((row) =>
-      row.roundIndex === undefined ? { ...row, roundIndex: 1 } : row
-    );
+    // Older backups need the same normalising the on-device upgrades applied:
+    // no purchases at all, or buys held as a count with no round and no card.
+    // Their own ids are dropped since nothing references them.
+    const purchases = [];
+    for (const row of Array.isArray(payload.purchases) ? payload.purchases : []) {
+      const roundIndex = row.roundIndex === undefined ? 1 : row.roundIndex;
+      if (row.count === undefined) {
+        purchases.push({
+          gameId: row.gameId,
+          roundIndex,
+          playerId: row.playerId,
+          rank: row.rank === undefined ? null : row.rank,
+          suit: row.suit === undefined ? null : row.suit,
+        });
+      } else {
+        for (let i = 0; i < row.count; i++) {
+          purchases.push({ gameId: row.gameId, roundIndex, playerId: row.playerId, rank: null, suit: null });
+        }
+      }
+    }
 
     await db.transaction("rw", db.games, db.players, db.scores, db.contractSets, db.purchases, async () => {
       await Promise.all([

@@ -83,6 +83,15 @@
         <h2 id="scorecard-title"></h2>
       </div>
 
+      <!-- What's been bought this round, so nobody discards a card someone wants -->
+      <div id="buys-strip" class="buys-strip">
+        <div class="buys-strip-head">
+          <span id="buys-strip-title" class="buys-strip-title"></span>
+          <button type="button" id="log-buy-btn" class="btn-secondary buys-strip-btn">+ Buy</button>
+        </div>
+        <div id="buys-strip-list" class="buys-strip-list"></div>
+      </div>
+
       <div class="scorecard-scroll">
         <table class="scorecard-table" id="scorecard-table">
           <thead>
@@ -240,14 +249,6 @@
          lower rows, so entry stays inside the sheet instead. -->
     <button type="button" id="sheet-wentout-btn" class="keypad-wide">Went out — 0</button>
 
-    <div class="sheet-buys">
-      <span id="sheet-buys-label" class="sheet-buys-label">Buys this round</span>
-      <div class="sheet-buys-stepper">
-        <button type="button" id="sheet-buy-minus" class="sheet-buy-btn" aria-label="One fewer buy">−</button>
-        <span id="sheet-buys-value" class="sheet-buys-value">0</span>
-        <button type="button" id="sheet-buy-plus" class="sheet-buy-btn" aria-label="One more buy">+</button>
-      </div>
-    </div>
     <div id="sheet-keypad" class="sheet-keypad">
       <button type="button" class="keypad-btn" data-key="1">1</button>
       <button type="button" class="keypad-btn" data-key="2">2</button>
@@ -266,6 +267,30 @@
     <div class="sheet-actions">
       <button type="button" id="sheet-cancel-btn" class="btn-secondary">Cancel</button>
       <button type="button" id="sheet-save-btn" class="btn-primary">Save</button>
+    </div>
+  </div>
+
+  <!-- Logging a buy: who took it, then which card -->
+  <div id="buy-overlay" class="sheet-overlay" hidden></div>
+  <div id="buy-sheet" class="score-sheet" hidden>
+    <div class="sheet-header">
+      <div>
+        <h3 id="buy-sheet-title">Add a buy</h3>
+        <p id="buy-sheet-step" class="sheet-contract"></p>
+      </div>
+      <button type="button" id="buy-close-btn" class="sheet-close-btn" aria-label="Close">×</button>
+    </div>
+
+    <div id="buy-players" class="buy-players"></div>
+
+    <div id="buy-card-picker" class="buy-card-picker" hidden>
+      <div id="buy-suits" class="buy-suits"></div>
+      <div id="buy-ranks" class="buy-ranks"></div>
+    </div>
+
+    <div class="sheet-actions">
+      <button type="button" id="buy-cancel-btn" class="btn-secondary">Cancel</button>
+      <button type="button" id="buy-skip-btn" class="btn-secondary" hidden>Skip card</button>
     </div>
   </div>
 
