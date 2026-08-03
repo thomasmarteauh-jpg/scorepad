@@ -3,7 +3,7 @@
 // network-first, so a running app picks up new files on its next load.
 // Bump APP_VERSION in app.js to match — Settings compares the two to show
 // whether a device has finished updating.
-const CACHE_VERSION = "v15";
+const CACHE_VERSION = "v16";
 const CACHE_NAME = `scorepad-cache-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

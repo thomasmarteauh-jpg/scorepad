@@ -111,7 +111,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "15";
+const APP_VERSION = "16";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -1098,6 +1098,11 @@ const chartLegendEl = document.getElementById("chart-legend");
 const chartRawToggleEl = document.getElementById("chart-raw-toggle");
 const toggleCompleteBtn = document.getElementById("toggle-complete-btn");
 const summaryNewGameBtn = document.getElementById("summary-new-game-btn");
+const shareSummaryBtn = document.getElementById("share-summary-btn");
+const shareStatusEl = document.getElementById("share-status");
+const shareFallbackEl = document.getElementById("share-fallback");
+
+let summaryData = null;
 
 const CHART_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#9a6324"];
 
@@ -1125,6 +1130,10 @@ async function enterSummaryScreen(gameId) {
   prepareCumulativeChart(players, scores, purchaseRows, mode);
   toggleCompleteBtn.textContent = game.isComplete ? "Reopen Game" : "Mark Game Complete";
 
+  summaryData = { game, players, scores, purchaseRows, mode, purchasePoints };
+  shareStatusEl.hidden = true;
+  shareFallbackEl.hidden = true;
+
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
   toggleCompleteBtn.onclick = async () => {
     await db.games.update(gameId, { isComplete: !game.isComplete });
@@ -1142,6 +1151,130 @@ async function enterSummaryScreen(gameId) {
     db.games.update(gameId, { isComplete: true }).then(() => navigate("new-game"));
   };
 }
+
+// ---- Share ----
+const MEDALS = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+// Laid out line by line rather than as a grid: chat apps use proportional
+// fonts, so anything relying on aligned columns arrives looking broken.
+function buildSummaryText(data) {
+  const { game, players, scores, purchaseRows, mode, purchasePoints } = data;
+  const contracts = (mode && mode.contracts) || DEFAULT_CONTRACTS;
+  const roundsPlayed = scores.reduce((max, s) => Math.max(max, s.roundIndex), 0);
+
+  const lines = [game.name];
+
+  const date = new Date(game.createdAt).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  // Say what was actually played, not just what the mode allows — a game
+  // finished early would otherwise claim its full round count.
+  const roundsLabel =
+    roundsPlayed === contracts.length ? `${contracts.length} rounds` : `${roundsPlayed} of ${contracts.length} rounds`;
+  lines.push(`${date} · ${mode ? mode.name : "Standard"} · ${roundsLabel}`);
+  if (!game.isComplete) {
+    lines.push(`In progress · round ${Math.min(roundsPlayed + 1, contracts.length)} of ${contracts.length}`);
+  }
+  lines.push("");
+
+  const standings = computeStandings(players, scores, purchasePoints);
+  standings.forEach((entry, index) => {
+    // Competition ranking, so tied players share a place and a medal.
+    const rank = 1 + standings.filter((other) => other.total < entry.total).length;
+    const marker = MEDALS[rank] || `${rank}.`;
+    const buyPoints = (purchasePoints && purchasePoints.get(entry.player.id)) || 0;
+    // Only worth splitting out for players who actually bought.
+    const detail = buyPoints ? ` (rounds ${entry.total - buyPoints} · buys ${buyPoints})` : "";
+    lines.push(`${marker} ${entry.player.name} — ${entry.total}${detail}`);
+  });
+
+  const buysByRoundAndPlayer = new Map();
+  for (const row of purchaseRows) {
+    const key = `${row.roundIndex}:${row.playerId}`;
+    buysByRoundAndPlayer.set(key, (buysByRoundAndPlayer.get(key) || 0) + (row.count || 0));
+  }
+
+  for (let round = 1; round <= roundsPlayed; round++) {
+    lines.push("");
+    lines.push(`Round ${round} — ${contracts[round - 1] || `Round ${round}`}`);
+    lines.push(
+      players
+        .map((player) => {
+          const score = scores.find((s) => s.roundIndex === round && s.playerId === player.id);
+          const buys = buysByRoundAndPlayer.get(`${round}:${player.id}`) || 0;
+          const buyNote = buys ? ` (+${buys} buy${buys === 1 ? "" : "s"})` : "";
+          return `${player.name} ${score ? score.points : 0}${buyNote}`;
+        })
+        .join(" · ")
+    );
+  }
+
+  lines.push("");
+  lines.push(location.origin + location.pathname.replace(/index\.html$/, ""));
+
+  return lines.join("\n");
+}
+
+// Last-resort copy for browsers without the async clipboard API.
+function legacyCopy(text) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (err) {
+    ok = false;
+  }
+  document.body.removeChild(area);
+  return ok;
+}
+
+shareSummaryBtn.addEventListener("click", async () => {
+  if (!summaryData) return;
+  const text = buildSummaryText(summaryData);
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ text });
+      shareStatusEl.hidden = true;
+      return;
+    } catch (err) {
+      // Dismissing the share sheet isn't a failure worth reporting.
+      if (err.name === "AbortError") return;
+    }
+  }
+
+  let copied = false;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (err) {
+      copied = false;
+    }
+  }
+  if (!copied) copied = legacyCopy(text);
+
+  if (copied) {
+    shareStatusEl.textContent = "Summary copied — paste it wherever you like.";
+    shareFallbackEl.hidden = true;
+  } else {
+    // Never leave the text unreachable: show it so it can be selected by hand.
+    shareStatusEl.textContent = "Couldn't copy automatically — select the text below.";
+    shareFallbackEl.value = text;
+    shareFallbackEl.hidden = false;
+    shareFallbackEl.focus();
+    shareFallbackEl.select();
+  }
+  shareStatusEl.hidden = false;
+});
 
 function renderStandings(players, scores, purchasePoints) {
   const standings = computeStandings(players, scores, purchasePoints);
