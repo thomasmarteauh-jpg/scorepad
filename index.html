@@ -222,6 +222,25 @@
       <button type="button" id="sheet-close-btn" class="sheet-close-btn" aria-label="Close">×</button>
     </div>
     <div id="sheet-players" class="sheet-players"></div>
+
+    <!-- Built-in pad: iOS's numeric keyboard has no "next" key and covers the
+         lower rows, so entry stays inside the sheet instead. -->
+    <button type="button" id="sheet-wentout-btn" class="keypad-wide">Went out — 0</button>
+    <div id="sheet-keypad" class="sheet-keypad">
+      <button type="button" class="keypad-btn" data-key="1">1</button>
+      <button type="button" class="keypad-btn" data-key="2">2</button>
+      <button type="button" class="keypad-btn" data-key="3">3</button>
+      <button type="button" class="keypad-btn" data-key="4">4</button>
+      <button type="button" class="keypad-btn" data-key="5">5</button>
+      <button type="button" class="keypad-btn" data-key="6">6</button>
+      <button type="button" class="keypad-btn" data-key="7">7</button>
+      <button type="button" class="keypad-btn" data-key="8">8</button>
+      <button type="button" class="keypad-btn" data-key="9">9</button>
+      <button type="button" class="keypad-btn" data-key="backspace" aria-label="Delete last digit">⌫</button>
+      <button type="button" class="keypad-btn" data-key="0">0</button>
+      <button type="button" class="keypad-btn keypad-next" data-key="next">Next</button>
+    </div>
+
     <div class="sheet-actions">
       <button type="button" id="sheet-cancel-btn" class="btn-secondary">Cancel</button>
       <button type="button" id="sheet-save-btn" class="btn-primary">Save</button>

@@ -607,8 +607,11 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   margin-top: 16px;
+  /* Shrinks first when the sheet is tall, so the pad is never pushed off. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .sheet-player-row {
@@ -616,27 +619,83 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.sheet-player-row.is-active {
+  border-color: var(--accent);
+  background: var(--surface);
 }
 
 .sheet-player-name {
   font-size: 1rem;
 }
 
-.sheet-score-input {
-  width: 92px;
-  min-height: 44px;
-  text-align: center;
-  font-size: 16px; /* keeps iOS from zooming in on focus */
-  border-radius: 10px;
+.sheet-score-value {
+  min-width: 44px;
+  text-align: right;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.sheet-score-value.is-empty {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* ---- Built-in number pad ---- */
+.keypad-wide {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 12px;
   border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.keypad-wide:active {
+  background: var(--border);
+}
+
+.sheet-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.keypad-btn {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   background: var(--bg);
   color: var(--text);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.keypad-btn:active {
+  background: var(--border);
+}
+
+.keypad-next {
+  font-size: 0.95rem;
 }
 
 .sheet-actions {
   display: flex;
   gap: 12px;
-  margin-top: 20px;
+  margin-top: 16px;
 }
 
 .sheet-actions button {

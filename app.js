@@ -91,7 +91,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -852,8 +852,12 @@ const sheetPlayersEl = document.getElementById("sheet-players");
 const sheetCloseBtn = document.getElementById("sheet-close-btn");
 const sheetCancelBtn = document.getElementById("sheet-cancel-btn");
 const sheetSaveBtn = document.getElementById("sheet-save-btn");
+const sheetKeypadEl = document.getElementById("sheet-keypad");
+const sheetWentOutBtn = document.getElementById("sheet-wentout-btn");
 
 let sheetRound = null;
+let sheetEntries = [];
+let sheetActiveIndex = 0;
 
 async function openRoundSheet(round) {
   sheetRound = round;
@@ -863,32 +867,97 @@ async function openRoundSheet(round) {
   const scores = await db.scores.where("[gameId+roundIndex]").equals([currentGameId, round]).toArray();
   const pointsByPlayerId = new Map(scores.map((s) => [s.playerId, s.points]));
 
-  sheetPlayersEl.innerHTML = "";
-  for (const player of currentPlayers) {
-    const row = document.createElement("div");
-    row.className = "sheet-player-row";
-
-    const label = document.createElement("span");
-    label.className = "sheet-player-name";
-    label.textContent = player.name;
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.inputMode = "numeric";
-    input.pattern = "[0-9]*";
-    input.className = "sheet-score-input";
-    input.dataset.playerId = String(player.id);
-    const existingPoints = pointsByPlayerId.get(player.id);
-    input.value = existingPoints !== undefined ? String(existingPoints) : "";
-
-    row.appendChild(label);
-    row.appendChild(input);
-    sheetPlayersEl.appendChild(row);
-  }
+  // Digits are held as strings so a half-typed "1" is distinguishable from a
+  // deliberate 0, and so backspace behaves the way it looks.
+  sheetEntries = currentPlayers.map((player) => {
+    const existing = pointsByPlayerId.get(player.id);
+    return existing !== undefined ? String(existing) : "";
+  });
+  sheetActiveIndex = 0;
+  renderSheetPlayers();
 
   sheetOverlayEl.hidden = false;
   scoreSheetEl.hidden = false;
 }
+
+function renderSheetPlayers() {
+  sheetPlayersEl.innerHTML = "";
+
+  currentPlayers.forEach((player, index) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "sheet-player-row";
+    if (index === sheetActiveIndex) row.classList.add("is-active");
+
+    const value = sheetEntries[index];
+    row.appendChild(makeCell("span", player.name, "sheet-player-name"));
+    const valueEl = makeCell("span", value === "" ? "–" : value, "sheet-score-value");
+    if (value === "") valueEl.classList.add("is-empty");
+    row.appendChild(valueEl);
+
+    row.setAttribute("aria-label", `${player.name}, ${value === "" ? "no score yet" : value}`);
+    row.addEventListener("click", () => {
+      sheetActiveIndex = index;
+      renderSheetPlayers();
+    });
+
+    sheetPlayersEl.appendChild(row);
+  });
+
+  keepActiveRowVisible();
+}
+
+// With a full table the list scrolls, so advancing could otherwise move the
+// active player out of sight. Scrolls the container directly rather than using
+// scrollIntoView, which would also move the page behind the sheet.
+function keepActiveRowVisible() {
+  const row = sheetPlayersEl.children[sheetActiveIndex];
+  if (!row) return;
+
+  // Measured with rects so it doesn't depend on which ancestor happens to be
+  // positioned.
+  const list = sheetPlayersEl.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  if (rowRect.top < list.top) {
+    sheetPlayersEl.scrollTop -= list.top - rowRect.top;
+  } else if (rowRect.bottom > list.bottom) {
+    sheetPlayersEl.scrollTop += rowRect.bottom - list.bottom;
+  }
+}
+
+function advanceSheetPlayer() {
+  sheetActiveIndex = (sheetActiveIndex + 1) % currentPlayers.length;
+}
+
+function pressKeypad(key) {
+  const current = sheetEntries[sheetActiveIndex];
+
+  if (key === "next") {
+    advanceSheetPlayer();
+  } else if (key === "backspace") {
+    sheetEntries[sheetActiveIndex] = current.slice(0, -1);
+  } else {
+    // Keep a lone leading zero from turning into "05".
+    const base = current === "0" ? "" : current;
+    if (base.length >= 4) return;
+    sheetEntries[sheetActiveIndex] = base + key;
+  }
+
+  renderSheetPlayers();
+}
+
+sheetKeypadEl.addEventListener("click", (event) => {
+  const btn = event.target.closest(".keypad-btn");
+  if (btn) pressKeypad(btn.dataset.key);
+});
+
+// Exactly one player goes out each round and scores nothing, so this is the
+// single most common entry.
+sheetWentOutBtn.addEventListener("click", () => {
+  sheetEntries[sheetActiveIndex] = "0";
+  advanceSheetPlayer();
+  renderSheetPlayers();
+});
 
 function closeSheet() {
   sheetOverlayEl.hidden = true;
@@ -900,29 +969,38 @@ sheetCloseBtn.addEventListener("click", closeSheet);
 sheetCancelBtn.addEventListener("click", closeSheet);
 sheetOverlayEl.addEventListener("click", closeSheet);
 
-sheetSaveBtn.addEventListener("click", async () => {
+sheetSaveBtn.addEventListener("click", () => {
   const round = sheetRound;
-  const inputs = Array.from(sheetPlayersEl.querySelectorAll(".sheet-score-input"));
+  const points = sheetEntries.map((value) => Math.max(0, parseInt(value, 10) || 0));
 
+  // Someone has to go out, so a round with no zero is nearly always a typo.
+  // confirm() runs before any await — see the note in handleUndoLastRound.
+  if (!points.some((p) => p === 0)) {
+    if (!confirm("No one scored 0 this round. Usually the player who goes out does. Save anyway?")) return;
+  }
+
+  saveRoundScores(round, points);
+});
+
+async function saveRoundScores(round, points) {
   await db.transaction("rw", db.scores, async () => {
-    for (const input of inputs) {
-      const playerId = Number(input.dataset.playerId);
-      const points = Math.max(0, parseInt(input.value, 10) || 0);
+    for (let i = 0; i < currentPlayers.length; i++) {
+      const playerId = currentPlayers[i].id;
       const existing = await db.scores
         .where("[gameId+roundIndex+playerId]")
         .equals([currentGameId, round, playerId])
         .first();
       if (existing) {
-        await db.scores.update(existing.id, { points });
+        await db.scores.update(existing.id, { points: points[i] });
       } else {
-        await db.scores.add({ gameId: currentGameId, roundIndex: round, playerId, points });
+        await db.scores.add({ gameId: currentGameId, roundIndex: round, playerId, points: points[i] });
       }
     }
   });
 
   closeSheet();
   await refreshScorecardBody();
-});
+}
 
 // ==================================================
 // Screen 4: game summary (standings + cumulative chart)
