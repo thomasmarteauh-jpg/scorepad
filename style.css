@@ -109,14 +109,28 @@ body {
 }
 
 /* ---- Home ---- */
-/* The app header would just repeat the logo and name, so it steps aside here. */
+/* The app header would just repeat the logo and name, so it steps aside here.
+   It was also what reserved room for the notch, so that has to be picked up
+   here instead — otherwise the logo sits under the Dynamic Island. */
 body.on-home .app-header {
   display: none;
 }
 
+body.on-home #app {
+  min-height: 100vh;
+  min-height: 100dvh; /* tracks the real viewport as browser chrome moves */
+  display: flex;
+  flex-direction: column;
+  /* "safe" keeps the top reachable if the content ever outgrows the screen. */
+  justify-content: center;
+  justify-content: safe center;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
 .home-brand {
   text-align: center;
-  margin: 24px 0 28px;
+  margin: 0 0 28px;
 }
 
 .home-logo {
