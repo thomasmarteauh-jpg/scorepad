@@ -108,6 +108,56 @@ body {
   display: block;
 }
 
+/* ---- Home ---- */
+/* The app header would just repeat the logo and name, so it steps aside here. */
+body.on-home .app-header {
+  display: none;
+}
+
+.home-brand {
+  text-align: center;
+  margin: 24px 0 28px;
+}
+
+.home-logo {
+  display: block;
+  margin: 0 auto 16px;
+  border-radius: 22%;
+}
+
+.home-name {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.home-tagline {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The shared full-width rule adds its own top margin; the gap handles it here. */
+.home-actions .full-width-btn {
+  margin-top: 0;
+}
+
+.home-actions button[hidden] {
+  display: none;
+}
+
+#home-continue-btn {
+  /* A long game name shouldn't stretch the button or wrap awkwardly. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- Games list ---- */
 .games-header {
   display: flex;
@@ -119,6 +169,7 @@ body {
 
 .games-header h2 {
   margin: 0;
+  flex: 1;
   font-size: 1.2rem;
 }
 

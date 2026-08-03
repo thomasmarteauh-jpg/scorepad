@@ -26,9 +26,32 @@
   </div>
 
   <main id="app">
+    <!-- Screen 0: where the app opens -->
+    <section id="home-screen" class="screen">
+      <div class="home-brand">
+        <img src="icons/icon-192.png" alt="" class="home-logo" width="96" height="96" />
+        <h2 class="home-name">ScorePad</h2>
+        <p class="home-tagline">Telefunken scorekeeping</p>
+      </div>
+
+      <div class="home-actions">
+        <button type="button" id="home-continue-btn" class="btn-primary full-width-btn" hidden></button>
+        <button type="button" id="home-new-game-btn" class="btn-secondary full-width-btn">New Game</button>
+        <button type="button" id="home-games-btn" class="btn-secondary full-width-btn">All Games</button>
+        <button type="button" id="home-settings-btn" class="btn-secondary full-width-btn">Settings</button>
+      </div>
+
+      <p id="home-version" class="version-info"></p>
+    </section>
+
     <!-- Screen 1: list of games -->
     <section id="games-screen" class="screen">
       <div class="games-header">
+        <button type="button" id="games-home-btn" class="header-icon-btn" aria-label="Home" title="Home">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M12 3.2 2.5 11.6a1 1 0 0 0 .66 1.75H4.7V20a1 1 0 0 0 1 1h3.6v-5.4h5.4V21h3.6a1 1 0 0 0 1-1v-6.65h1.54a1 1 0 0 0 .66-1.75L12 3.2z"/>
+          </svg>
+        </button>
         <h2>Games</h2>
         <button type="button" id="settings-nav-btn" class="btn-secondary">Settings</button>
       </div>

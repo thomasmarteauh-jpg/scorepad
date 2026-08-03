@@ -159,7 +159,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "18";
+const APP_VERSION = "19";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -178,12 +178,18 @@ function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
   document.getElementById(id).classList.add("active");
   newGameBtn.style.display = id === "games-screen" ? "" : "none";
+  // Home shows its own logo and name, so the app header is redundant there.
+  document.body.classList.toggle("on-home", id === "home-screen");
 }
 
 async function handleRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 
-  if (parts[0] === "new-game") {
+  if (parts[0] === "home") {
+    await enterHomeScreen();
+  } else if (parts[0] === "games") {
+    await enterGamesScreen();
+  } else if (parts[0] === "new-game") {
     await enterNewGameScreen();
   } else if (parts[0] === "scorecard" && parts[1]) {
     await enterScorecardScreen(Number(parts[1]));
@@ -196,7 +202,8 @@ async function handleRoute() {
   } else if (parts[0] === "contract-set" && parts[1]) {
     await enterContractSetScreen(Number(parts[1]));
   } else {
-    await enterGamesScreen();
+    // No hash — how the app opens from the home screen icon.
+    await enterHomeScreen();
   }
 }
 
@@ -255,6 +262,40 @@ async function getPurchasePointsForGame(game, mode) {
   const rows = await db.purchases.where("gameId").equals(game.id).toArray();
   return buysToPoints(totalBuysByPlayer(rows, purchaseLimitOf(resolvedMode)), penaltyOf(resolvedMode));
 }
+
+// ==================================================
+// Screen 0: home
+// ==================================================
+const homeContinueBtn = document.getElementById("home-continue-btn");
+const homeNewGameBtn = document.getElementById("home-new-game-btn");
+const homeGamesBtn = document.getElementById("home-games-btn");
+const homeSettingsBtn = document.getElementById("home-settings-btn");
+const homeVersionEl = document.getElementById("home-version");
+
+async function enterHomeScreen() {
+  showScreen("home-screen");
+  homeVersionEl.textContent = `Version ${APP_VERSION}`;
+
+  // Offer the most recent unfinished game, which is nearly always the one
+  // you're coming back to.
+  const games = await db.games.orderBy("createdAt").reverse().toArray();
+  const inProgress = games.find((game) => !game.isComplete);
+
+  homeContinueBtn.hidden = !inProgress;
+  if (inProgress) {
+    homeContinueBtn.textContent = `Continue — ${inProgress.name}`;
+    homeContinueBtn.onclick = () => navigate(`scorecard/${inProgress.id}`);
+  }
+
+  // Whichever action is topmost should read as the primary one.
+  homeNewGameBtn.classList.toggle("btn-primary", !inProgress);
+  homeNewGameBtn.classList.toggle("btn-secondary", !!inProgress);
+}
+
+homeNewGameBtn.addEventListener("click", () => navigate("new-game"));
+homeGamesBtn.addEventListener("click", () => navigate("games"));
+homeSettingsBtn.addEventListener("click", () => navigate("settings"));
+document.getElementById("games-home-btn").addEventListener("click", () => navigate("home"));
 
 // ==================================================
 // Screen 1: games list
@@ -1301,7 +1342,8 @@ async function enterSummaryScreen(gameId) {
   shareFallbackEl.hidden = true;
 
   summaryBackBtn.onclick = () => navigate(`scorecard/${gameId}`);
-  summaryHomeBtn.onclick = () => navigate("games");
+  // The house icon means the same thing everywhere it appears: back to the top.
+  summaryHomeBtn.onclick = () => navigate("home");
   toggleCompleteBtn.onclick = async () => {
     await db.games.update(gameId, { isComplete: !game.isComplete });
     await enterSummaryScreen(gameId);
