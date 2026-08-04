@@ -15,8 +15,9 @@ html, body {
   --border: #e0e0e0;
   --text: #1a1a1a;
   --muted: #767676;
-  --accent: #2f6fed;
-  --accent-active: #2558c0;
+  /* Brand red, sampled from the logo artwork. */
+  --accent: #e6151b;
+  --accent-active: #b81016;
   --error: #d1293d;
 }
 
@@ -27,8 +28,8 @@ html, body {
     --border: #2a2a2a;
     --text: #f0f0f0;
     --muted: #9a9a9a;
-    --accent: #4c86ff;
-    --accent-active: #3a6bd6;
+    --accent: #e6151b;
+    --accent-active: #b81016;
     --error: #ff6b7a;
   }
 }

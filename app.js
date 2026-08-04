@@ -159,7 +159,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "20";
+const APP_VERSION = "21";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
