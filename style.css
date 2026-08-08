@@ -539,10 +539,6 @@ body.on-home #app {
   font-weight: 700;
 }
 
-.buy-chip-card.is-red {
-  color: #e6194b;
-}
-
 .buy-chip-remove {
   color: var(--muted);
   font-size: 0.95rem;
@@ -578,32 +574,6 @@ body.on-home #app {
 
 .buy-card-picker[hidden] {
   display: none;
-}
-
-.buy-suits {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.buy-suit-btn {
-  min-height: 52px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 1.6rem;
-  line-height: 1;
-}
-
-.buy-suit-btn.is-red {
-  color: #e6194b;
-}
-
-.buy-suit-btn.is-active {
-  border-color: var(--accent);
-  background: var(--surface);
 }
 
 .buy-ranks {

@@ -96,21 +96,12 @@ db.version(6)
     if (expanded.length) await table.bulkAdd(expanded);
   });
 
+// Only the rank is recorded: sets are built from matching ranks, so the suit
+// of a bought card doesn't tell anyone what to hold back.
 const CARD_RANKS = ["3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
-const CARD_SUITS = [
-  { code: "S", symbol: "♠", red: false },
-  { code: "H", symbol: "♥", red: true },
-  { code: "D", symbol: "♦", red: true },
-  { code: "C", symbol: "♣", red: false },
-];
-
-function suitInfo(code) {
-  return CARD_SUITS.find((s) => s.code === code) || null;
-}
 
 function cardLabel(row) {
-  const suit = suitInfo(row.suit);
-  return row.rank && suit ? `${row.rank}${suit.symbol}` : "?";
+  return row.rank || "?";
 }
 
 const DEFAULT_CONTRACTS = [
@@ -159,7 +150,7 @@ async function ensureDefaultContractSet() {
 // reflects the service worker in charge. A mismatch means an update has been
 // fetched but the old worker is still serving, which is exactly the state
 // that used to be invisible.
-const APP_VERSION = "21";
+const APP_VERSION = "22";
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
@@ -891,10 +882,7 @@ function renderBuysStrip() {
     chip.className = "buy-chip";
     chip.appendChild(makeCell("span", player.name));
 
-    const suit = suitInfo(row.suit);
-    const cardEl = makeCell("span", cardLabel(row), "buy-chip-card");
-    if (suit && suit.red) cardEl.classList.add("is-red");
-    chip.appendChild(cardEl);
+    chip.appendChild(makeCell("span", cardLabel(row), "buy-chip-card"));
     chip.appendChild(makeCell("span", "×", "buy-chip-remove"));
 
     chip.setAttribute("aria-label", `Remove ${player.name}'s buy, ${cardLabel(row)}`);
@@ -1007,7 +995,6 @@ const buySheetTitleEl = document.getElementById("buy-sheet-title");
 const buySheetStepEl = document.getElementById("buy-sheet-step");
 const buyPlayersEl = document.getElementById("buy-players");
 const buyCardPickerEl = document.getElementById("buy-card-picker");
-const buySuitsEl = document.getElementById("buy-suits");
 const buyRanksEl = document.getElementById("buy-ranks");
 const buyCloseBtn = document.getElementById("buy-close-btn");
 const buyCancelBtn = document.getElementById("buy-cancel-btn");
@@ -1015,12 +1002,10 @@ const buySkipBtn = document.getElementById("buy-skip-btn");
 
 let buyRound = 1;
 let buyPlayerId = null;
-let buySuit = null;
 
 function openBuyDialog() {
   buyRound = currentPlayRound();
   buyPlayerId = null;
-  buySuit = null;
   buySheetTitleEl.textContent = `Add a buy — round ${buyRound}`;
   renderBuyDialog();
   buyOverlayEl.hidden = false;
@@ -1053,37 +1038,19 @@ function renderBuyDialog() {
     buyPlayersEl.appendChild(btn);
   }
 
-  buySuitsEl.innerHTML = "";
-  for (const suit of CARD_SUITS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "buy-suit-btn";
-    if (suit.red) btn.classList.add("is-red");
-    if (suit.code === buySuit) btn.classList.add("is-active");
-    btn.textContent = suit.symbol;
-    btn.setAttribute("aria-label", suit.code);
-    btn.addEventListener("click", () => {
-      buySuit = suit.code;
-      renderBuyDialog();
-    });
-    buySuitsEl.appendChild(btn);
-  }
-
-  // Ranks stay out of reach until a suit is chosen, since picking one commits
-  // the buy — three taps total: player, suit, rank.
+  // Picking a rank commits the buy — two taps total: player, then rank.
   buyRanksEl.innerHTML = "";
   for (const rank of CARD_RANKS) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "buy-rank-btn";
     btn.textContent = rank;
-    btn.disabled = buySuit === null;
-    btn.addEventListener("click", () => saveBuy(rank, buySuit));
+    btn.addEventListener("click", () => saveBuy(rank));
     buyRanksEl.appendChild(btn);
   }
 }
 
-async function saveBuy(rank, suit) {
+async function saveBuy(rank) {
   if (buyPlayerId === null) return;
 
   await db.purchases.add({
@@ -1091,7 +1058,8 @@ async function saveBuy(rank, suit) {
     roundIndex: buyRound,
     playerId: buyPlayerId,
     rank: rank || null,
-    suit: suit || null,
+    // Suit is no longer collected; the column stays so older rows still load.
+    suit: null,
   });
 
   // Make sure the round being played is actually on the card.
@@ -1105,7 +1073,7 @@ logBuyBtn.addEventListener("click", openBuyDialog);
 buyCloseBtn.addEventListener("click", closeBuyDialog);
 buyCancelBtn.addEventListener("click", closeBuyDialog);
 buyOverlayEl.addEventListener("click", closeBuyDialog);
-buySkipBtn.addEventListener("click", () => saveBuy(null, null));
+buySkipBtn.addEventListener("click", () => saveBuy(null));
 
 // ==================================================
 // Round score entry sheet
